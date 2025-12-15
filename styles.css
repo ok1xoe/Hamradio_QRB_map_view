@@ -1,0 +1,88 @@
+/* styles.css */
+html, body { height: 100%; margin: 0; }
+#map { width: 100%; height: 100%; }
+
+.info {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    background: rgba(255,255,255,0.95);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.4;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    max-width: 560px;
+}
+
+.info .row { margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.info select, .info button, .info input, .info textarea {
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    background: #fff;
+    cursor: pointer;
+    font-size: 14px;
+}
+.info input[type="file"] { padding: 4px 6px; }
+.info input { cursor: text; width: 160px; }
+.info textarea { cursor: text; width: 100%; min-height: 92px; resize: vertical; }
+.info button:hover { background: #f5f5f5; }
+
+.muted { opacity: 0.75; font-size: 12px; margin-top: 6px; }
+
+.inline-check { display:flex; align-items:center; gap:6px; margin-left:6px; }
+.full { flex: 1 1 100%; }
+.row.full { width: 100%; }
+
+/* Kontextové menu pro mapu */
+#contextMenu {
+    position: absolute;
+    display: none;
+    z-index: 9999;
+    background: rgba(255,255,255,0.98);
+    border: 1px solid rgba(0,0,0,0.15);
+    border-radius: 10px;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.18);
+    padding: 6px;
+    min-width: 210px;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+#contextMenu button {
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+}
+#contextMenu button:hover { background: rgba(0,0,0,0.06); }
+
+/* Seznam lokátorů */
+#locatorList {
+    margin-top: 6px;
+    padding-left: 18px;
+    max-height: 140px;
+    overflow: auto;
+}
+#locatorList li { margin: 2px 0; }
+#locatorList code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* Minimalizace celého panelu */
+#controlPanel { width: auto; }
+#controlPanel .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+#controlPanel .panel-header .title {
+    font-weight: 700;
+    font-size: 14px;
+}
+#controlPanel.collapsed { max-width: 260px; }
+#controlPanel.collapsed .muted { display: none; }
+#controlPanel.collapsed .panel-body { display: none; }
