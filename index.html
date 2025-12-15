@@ -1,10 +1,100 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="cs">
 <head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
+    <meta charset="utf-8" />
+    <title>Hamradio QRB map viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@latest/ol.css" />
+    <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-$END$
+
+<div id="map"></div>
+
+<!-- Kontextové menu -->
+<div id="contextMenu" role="menu" aria-label="Menu mapy">
+    <button id="ctxAddQth" type="button">Přidej Moje QTH</button>
+    <button id="ctxExportPng" type="button">Export mapy do PNG</button>
+</div>
+
+<div class="info" id="controlPanel">
+    <div class="panel-header">
+        <div>
+            <div class="title" id="appTitle">Hamradio QRB map viewer</div>
+            <div class="muted" id="appDesc">Maidenhead Locator: Field (2) / Square (4) / Subsquare (6)</div>
+        </div>
+        <button id="togglePanel" type="button">Minimalizovat</button>
+    </div>
+
+    <div class="panel-body">
+        <div class="row">
+            <label for="lang" id="lblLang">Jazyk:</label>
+            <select id="lang">
+                <option value="cs" selected>CZ</option>
+                <option value="en">EN</option>
+            </select>
+        </div>
+
+        <div class="row">
+            <label for="mode" id="lblGridMode">Mřížka:</label>
+            <select id="mode">
+                <option value="auto" selected>AUTO</option>
+                <option value="field">Field (JN)</option>
+                <option value="square">Square (JN89)</option>
+                <option value="subsquare">Subsquare (JN89ab)</option>
+            </select>
+        </div>
+
+        <div class="row">
+            <label class="inline-check">
+                <span id="lblGridToggle">Zobrazit mřížku</span>
+                <input type="checkbox" id="gridToggle" checked />
+            </label>
+        </div>
+
+
+
+
+        <div class="row">
+            <label for="ediFile" id="lblEdi">Import EDI:</label>
+            <input id="ediFile" type="file" accept=".d,.D,.edi,.EDI,text/plain" />
+            <button id="importEdi" type="button">Načíst</button>
+
+            <label class="inline-check">
+                <span id="lblEdiSetQth">Nastavit QTH z EDI</span>
+                <input type="checkbox" id="ediSetQth" checked />
+            </label>
+        </div>
+
+        <div class="row">
+            <label for="locator" id="lblSearch">Vyhledat čtverec:</label>
+            <input id="locator" placeholder="např. JN / JN89 / JN89ab" inputmode="latin" autocomplete="off" spellcheck="false" />
+            <button id="goLocator" type="button">Najít</button>
+            <button id="clearLocator" type="button">Zrušit</button>
+        </div>
+
+        <div class="row">
+            <label for="qth" id="lblQth">Moje QTH:</label>
+            <input id="qth" placeholder="např. JN89ab" inputmode="latin" autocomplete="off" spellcheck="false" />
+            <button id="setQth" type="button">Zobrazit</button>
+            <button id="clearQth" type="button">Smazat</button>
+        </div>
+
+        <div class="row full">
+            <label for="targets" id="lblTargetsHelp" class="full">Lokátory (6 znaků, např. JO80AD; jeden na řádek):</label>
+            <textarea id="targets" placeholder="JO80AD&#10;JN89AB&#10;..."></textarea>
+            <button id="plotTargets" type="button">Zobrazit na mapě</button>
+            <button id="clearTargets" type="button">Vymazat</button>
+        </div>
+
+        <ol id="locatorList"></ol>
+
+        <div class="muted" id="status"></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.js"></script>
+<script type="module" src="./js/app.js"></script>
 </body>
 </html>

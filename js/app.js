@@ -1,353 +1,114 @@
-// app.js
+// js/app.js
+import {
+    maidenheadSubsquare,
+    locatorToExtentWGS84,
+    locatorToCenterLonLat,
+    buildGrid
+} from './maidenhead.js';
+
+import { createI18n, applyTranslations, normalizeLang } from './i18n.js';
+import { parseEdiText, importEdiFile } from './edi.js';
+import { exportMapAsPng } from './exportPng.js';
+import { loadDxccIndex, findDxccByCall } from './dxcc.js';
+
 (() => {
-    /************************************************************
-     *  EXTENT (používá se pro "fit" tlačítko)
-     ************************************************************/
-    const zlinskyExtentWGS84 = [16.8, 48.95, 18.6, 49.75]; // lon/lat
+    const zlinskyExtentWGS84 = [16.8, 48.95, 18.6, 49.75];
     const zlinskyExtent3857 = ol.proj.transformExtent(zlinskyExtentWGS84, 'EPSG:4326', 'EPSG:3857');
 
-    /************************************************************
-     *  UI prvky
-     ************************************************************/
-    const controlPanel = document.getElementById('controlPanel');
-    const togglePanelBtn = document.getElementById('togglePanel');
-    const panelBodyEl = controlPanel ? controlPanel.querySelector('.panel-body') : null;
+    // UI refs
+    const ui = {
+        controlPanel: document.getElementById('controlPanel'),
+        togglePanelBtn: document.getElementById('togglePanel'),
+        panelBodyEl: document.getElementById('controlPanel')?.querySelector('.panel-body') ?? null,
 
-    const modeSelect = document.getElementById('mode');
-    const statusEl = document.getElementById('status');
+        modeSelect: document.getElementById('mode'),
+        statusEl: document.getElementById('status'),
 
-    const locatorInput = document.getElementById('locator');
-    const goLocatorBtn = document.getElementById('goLocator');
-    const clearLocatorBtn = document.getElementById('clearLocator');
+        locatorInput: document.getElementById('locator'),
+        goLocatorBtn: document.getElementById('goLocator'),
+        clearLocatorBtn: document.getElementById('clearLocator'),
 
-    const qthInput = document.getElementById('qth');
-    const setQthBtn = document.getElementById('setQth');
-    const clearQthBtn = document.getElementById('clearQth');
+        qthInput: document.getElementById('qth'),
+        setQthBtn: document.getElementById('setQth'),
+        clearQthBtn: document.getElementById('clearQth'),
 
-    const targetsTextarea = document.getElementById('targets');
-    const plotTargetsBtn = document.getElementById('plotTargets');
-    const clearTargetsBtn = document.getElementById('clearTargets');
-    const locatorListEl = document.getElementById('locatorList');
+        targetsTextarea: document.getElementById('targets'),
+        plotTargetsBtn: document.getElementById('plotTargets'),
+        clearTargetsBtn: document.getElementById('clearTargets'),
+        locatorListEl: document.getElementById('locatorList'),
 
-    const contextMenuEl = document.getElementById('contextMenu');
-    const ctxAddQthBtn = document.getElementById('ctxAddQth');
-    const ctxExportPngBtn = document.getElementById('ctxExportPng');
+        contextMenuEl: document.getElementById('contextMenu'),
+        ctxAddQthBtn: document.getElementById('ctxAddQth'),
+        ctxExportPngBtn: document.getElementById('ctxExportPng'),
 
-    const gridToggle = document.getElementById('gridToggle');
+        gridToggle: document.getElementById('gridToggle'),
 
-    const ediFileInput = document.getElementById('ediFile');
-    const ediSetQthCheckbox = document.getElementById('ediSetQth');
-    const importEdiBtn = document.getElementById('importEdi');
+        ediFileInput: document.getElementById('ediFile'),
+        ediSetQthCheckbox: document.getElementById('ediSetQth'),
+        importEdiBtn: document.getElementById('importEdi'),
 
-    const langSelect = document.getElementById('lang');
-
-    /************************************************************
-     *  i18n CZ/EN (bez localStorage)
-     ************************************************************/
-    const i18n = {
-        cs: {
-            appTitle: 'Hamradio QRB map viewer',
-            appDesc: 'Maidenhead Locator: Field (2) / Square (4) / Subsquare (6)',
-            togglePanelCollapse: 'Minimalizovat',
-            togglePanelExpand: 'Zobrazit',
-            lblLang: 'Jazyk:',
-            fit: 'Přiblížit na výřez (Zlínský kraj)',
-            lblGridMode: 'Mřížka:',
-            lblGridToggle: 'Zobrazit mřížku',
-            lblEdi: 'Import EDI:',
-            lblEdiSetQth: 'Nastavit QTH z EDI',
-            importEdi: 'Načíst',
-            lblSearch: 'Vyhledat čtverec:',
-            goLocator: 'Najít',
-            clearLocator: 'Zrušit',
-            lblQth: 'Moje QTH:',
-            setQth: 'Zobrazit',
-            clearQth: 'Smazat',
-            lblTargetsHelp: 'Lokátory (6 znaků, např. JO80AD; jeden na řádek):',
-            plotTargets: 'Zobrazit na mapě',
-            clearTargets: 'Vymazat',
-            placeholderLocator: 'např. JN / JN89 / JN89ab',
-            placeholderQth: 'např. JN89ab',
-            placeholderTargets: 'JO80AD\nJN89AB\n...',
-            ctxAddQth: 'Přidej Moje QTH',
-            ctxExportPng: 'Export mapy do PNG',
-            msgPickEdi: 'Vyber prosím EDI soubor.',
-            msgEdiNoLocs: 'V EDI jsem nenašel žádné lokátory protistanic (6 znaků).',
-            msgEdiLoaded: (n, my) => `EDI načteno: ${n} lokátorů${my ? ` | QTH: ${my}` : ''}`,
-            msgBadLocator: 'Neplatný lokátor. Zadej 2/4/6 znaků (např. JN / JN89 / JN89ab).',
-            msgBadQth: 'Neplatné QTH. Zadej lokátor ve formátu 2/4/6 znaků (např. JN89ab).',
-            msgGridOff: z => `Zoom: ${z} | Mřížka: VYPNUTO`,
-            msgGridOn: (z, lvl, n) => `Zoom: ${z} | ${lvl} | Buněk: ${n}`,
-            msgInvalidLines: s => `Neplatné řádky (ignorováno): ${s}`,
-            msgShownLocs: (n, hasQth) => `Zobrazeno lokátorů: ${n}${hasQth ? '' : ' (vzdálenost až po nastavení QTH)'}`,
-            msgQthFromMap: (loc, lon, lat) => `QTH nastaveno z mapy: ${loc} (lon ${lon}, lat ${lat})`,
-            msgNeedQthForDist: '— (nastav Moje QTH pro vzdálenost)'
-        },
-        en: {
-            appTitle: 'Hamradio QRB map viewer',
-            appDesc: 'Maidenhead Locator: Field (2) / Square (4) / Subsquare (6)',
-            togglePanelCollapse: 'Minimize',
-            togglePanelExpand: 'Show',
-            lblLang: 'Language:',
-            fit: 'Zoom to region (Zlín)',
-            lblGridMode: 'Grid:',
-            lblGridToggle: 'Show grid',
-            lblEdi: 'Import EDI:',
-            lblEdiSetQth: 'Set QTH from EDI',
-            importEdi: 'Load',
-            lblSearch: 'Find locator:',
-            goLocator: 'Find',
-            clearLocator: 'Clear',
-            lblQth: 'My QTH:',
-            setQth: 'Show',
-            clearQth: 'Remove',
-            lblTargetsHelp: 'Locators (6 chars, e.g. JO80AD; one per line):',
-            plotTargets: 'Show on map',
-            clearTargets: 'Clear',
-            placeholderLocator: 'e.g. JN / JN89 / JN89ab',
-            placeholderQth: 'e.g. JN89ab',
-            placeholderTargets: 'JO80AD\nJN89AB\n...',
-            ctxAddQth: 'Add My QTH',
-            ctxExportPng: 'Export map as PNG',
-            msgPickEdi: 'Please choose an EDI file.',
-            msgEdiNoLocs: 'No 6-char remote locators found in EDI.',
-            msgEdiLoaded: (n, my) => `EDI loaded: ${n} locators${my ? ` | QTH: ${my}` : ''}`,
-            msgBadLocator: 'Invalid locator. Use 2/4/6 chars (e.g. JN / JN89 / JN89ab).',
-            msgBadQth: 'Invalid QTH. Use locator format 2/4/6 (e.g. JN89ab).',
-            msgGridOff: z => `Zoom: ${z} | Grid: OFF`,
-            msgGridOn: (z, lvl, n) => `Zoom: ${z} | ${lvl} | Cells: ${n}`,
-            msgInvalidLines: s => `Invalid lines (ignored): ${s}`,
-            msgShownLocs: (n, hasQth) => `Shown locators: ${n}${hasQth ? '' : ' (distance after setting QTH)'}`,
-            msgQthFromMap: (loc, lon, lat) => `QTH set from map: ${loc} (lon ${lon}, lat ${lat})`,
-            msgNeedQthForDist: '— (set My QTH to compute distance)'
-        }
+        langSelect: document.getElementById('lang')
     };
 
-    let currentLang = (langSelect && langSelect.value) ? langSelect.value : 'cs';
+    const dict = createI18n();
+    let currentLang = normalizeLang(ui.langSelect?.value);
 
-    function isPanelCollapsed() {
-        return controlPanel.classList.contains('collapsed');
+    // Pokud je seznam naplněn z EDI, uložíme mapu locator -> { call, qso }.
+    // Pokud je prázdná, zobrazujeme lokátory.
+    let importedByLocator = new Map();
+
+    // DXCC index (načte se lazy a cachuje se)
+    let dxccIndex = null;
+    let dxccIndexPromise = null;
+
+    function ensureDxccLoaded() {
+        if (dxccIndex) return Promise.resolve(dxccIndex);
+        if (dxccIndexPromise) return dxccIndexPromise;
+
+        dxccIndexPromise = loadDxccIndex({ url: './dxcc/dxcc.json' })
+            .then((idx) => {
+                dxccIndex = idx;
+                return dxccIndex;
+            })
+            .catch((err) => {
+                // DXCC je „nice to have“, mapu to nesmí shodit
+                dxccIndex = null;
+                dxccIndexPromise = null;
+                console.warn('DXCC load failed:', err);
+                return null;
+            });
+
+        return dxccIndexPromise;
     }
 
-    function applyTranslations(lang) {
-        const t = i18n[lang] || i18n.cs;
+    function isPanelCollapsed() {
+        return ui.controlPanel.classList.contains('collapsed');
+    }
 
-        document.documentElement.lang = (lang === 'en') ? 'en' : 'cs';
-        document.title = t.appTitle;
-
-        const setText = (id, text) => {
-            const el = document.getElementById(id);
-            if (el) el.textContent = text;
-        };
-
-        setText('appTitle', t.appTitle);
-        setText('appDesc', t.appDesc);
-        setText('lblLang', t.lblLang);
-        setText('lblGridMode', t.lblGridMode);
-        setText('lblGridToggle', t.lblGridToggle);
-        setText('lblEdi', t.lblEdi);
-        setText('lblEdiSetQth', t.lblEdiSetQth);
-        setText('lblSearch', t.lblSearch);
-        setText('lblQth', t.lblQth);
-        setText('lblTargetsHelp', t.lblTargetsHelp);
-
-        document.getElementById('fit').textContent = t.fit;
-
-        importEdiBtn.textContent = t.importEdi;
-        goLocatorBtn.textContent = t.goLocator;
-        clearLocatorBtn.textContent = t.clearLocator;
-        setQthBtn.textContent = t.setQth;
-        clearQthBtn.textContent = t.clearQth;
-        plotTargetsBtn.textContent = t.plotTargets;
-        clearTargetsBtn.textContent = t.clearTargets;
-
-        locatorInput.placeholder = t.placeholderLocator;
-        qthInput.placeholder = t.placeholderQth;
-        targetsTextarea.placeholder = t.placeholderTargets;
-
-        ctxAddQthBtn.textContent = t.ctxAddQth;
-        if (ctxExportPngBtn) ctxExportPngBtn.textContent = t.ctxExportPng;
-
-        togglePanelBtn.textContent = isPanelCollapsed() ? t.togglePanelExpand : t.togglePanelCollapse;
+    function t() {
+        return dict[currentLang] || dict.cs;
     }
 
     function setLanguage(lang) {
-        currentLang = (lang === 'en') ? 'en' : 'cs';
-        langSelect.value = currentLang;
-        applyTranslations(currentLang);
+        currentLang = normalizeLang(lang);
+        ui.langSelect.value = currentLang;
+        applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed });
         refreshGrid();
     }
 
-    langSelect.addEventListener('change', () => setLanguage(langSelect.value));
-
-    /************************************************************
-     *  MINIMALIZACE PANELU (spolehlivě – skrývá panel-body i přes JS)
-     ************************************************************/
-    if (togglePanelBtn && controlPanel && panelBodyEl) {
-        togglePanelBtn.addEventListener('click', (e) => {
+    // Panel collapse
+    if (ui.togglePanelBtn && ui.controlPanel && ui.panelBodyEl) {
+        ui.togglePanelBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
 
-            const collapsed = controlPanel.classList.toggle('collapsed');
-            panelBodyEl.style.display = collapsed ? 'none' : 'block';
-
-            applyTranslations(currentLang);
+            const collapsed = ui.controlPanel.classList.toggle('collapsed');
+            ui.panelBodyEl.style.display = collapsed ? 'none' : 'block';
+            applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed });
         });
     }
 
-    /************************************************************
-     *  MAIDENHEAD helpers
-     ************************************************************/
-    function locatorToExtentWGS84(locatorRaw) {
-        const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        const a = "abcdefghijklmnopqrstuvwxyz";
-
-        const loc = String(locatorRaw || "").trim();
-        if (!loc) return null;
-
-        const locU = loc.toUpperCase();
-        const locL = loc.toLowerCase();
-
-        if (!(loc.length === 2 || loc.length === 4 || loc.length === 6)) return null;
-
-        const fLon = A.indexOf(locU[0]);
-        const fLat = A.indexOf(locU[1]);
-        if (fLon < 0 || fLat < 0) return null;
-
-        const fieldLon0 = -180 + fLon * 20;
-        const fieldLat0 = -90 + fLat * 10;
-
-        if (loc.length === 2) return [fieldLon0, fieldLat0, fieldLon0 + 20, fieldLat0 + 10];
-
-        const sLon = Number(locU[2]);
-        const sLat = Number(locU[3]);
-        if (!Number.isInteger(sLon) || sLon < 0 || sLon > 9) return null;
-        if (!Number.isInteger(sLat) || sLat < 0 || sLat > 9) return null;
-
-        const lon0 = fieldLon0 + sLon * 2;
-        const lat0 = fieldLat0 + sLat * 1;
-
-        if (loc.length === 4) return [lon0, lat0, lon0 + 2, lat0 + 1];
-
-        const subLon = a.indexOf(locL[4]);
-        const subLat = a.indexOf(locL[5]);
-        if (subLon < 0 || subLon > 23) return null;
-        if (subLat < 0 || subLat > 23) return null;
-
-        const stepLon = 1 / 12;
-        const stepLat = 1 / 24;
-
-        const slon0 = lon0 + subLon * stepLon;
-        const slat0 = lat0 + subLat * stepLat;
-
-        return [slon0, slat0, slon0 + stepLon, slat0 + stepLat];
-    }
-
-    function maidenheadField(lon, lat) {
-        const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        const lonAdj = lon + 180;
-        const latAdj = lat + 90;
-        const fieldLon = Math.floor(lonAdj / 20);
-        const fieldLat = Math.floor(latAdj / 10);
-        return `${A[fieldLon]}${A[fieldLat]}`;
-    }
-
-    function maidenheadSquare(lon, lat) {
-        const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        const lonAdj = lon + 180;
-        const latAdj = lat + 90;
-
-        const fieldLon = Math.floor(lonAdj / 20);
-        const fieldLat = Math.floor(latAdj / 10);
-        const squareLon = Math.floor((lonAdj % 20) / 2);
-        const squareLat = Math.floor((latAdj % 10) / 1);
-
-        return `${A[fieldLon]}${A[fieldLat]}${squareLon}${squareLat}`;
-    }
-
-    function maidenheadSubsquare(lon, lat) {
-        const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        const a = "abcdefghijklmnopqrstuvwxyz";
-        const lonAdj = lon + 180;
-        const latAdj = lat + 90;
-
-        const fieldLon = Math.floor(lonAdj / 20);
-        const fieldLat = Math.floor(latAdj / 10);
-
-        const squareLon = Math.floor((lonAdj % 20) / 2);
-        const squareLat = Math.floor((latAdj % 10) / 1);
-
-        const lonIn2deg = (lonAdj % 2);
-        const latIn1deg = (latAdj % 1);
-
-        const subsLon = Math.floor(lonIn2deg / (1 / 12));
-        const subsLat = Math.floor(latIn1deg / (1 / 24));
-
-        return `${A[fieldLon]}${A[fieldLat]}${squareLon}${squareLat}${a[subsLon]}${a[subsLat]}`;
-    }
-
-    function buildGrid(extent3857, level) {
-        const ll = ol.proj.toLonLat([extent3857[0], extent3857[1]]);
-        const ur = ol.proj.toLonLat([extent3857[2], extent3857[3]]);
-
-        let minLon = Math.max(-180, Math.min(ll[0], ur[0]));
-        let maxLon = Math.min(180, Math.max(ll[0], ur[0]));
-        let minLat = Math.max(-90, Math.min(ll[1], ur[1]));
-        let maxLat = Math.min(90, Math.max(ll[1], ur[1]));
-
-        let stepLon, stepLat, labelFn;
-        if (level === "subsquare") {
-            stepLon = 1 / 12;
-            stepLat = 1 / 24;
-            labelFn = maidenheadSubsquare;
-        } else if (level === "field") {
-            stepLon = 20;
-            stepLat = 10;
-            labelFn = maidenheadField;
-        } else {
-            stepLon = 2;
-            stepLat = 1;
-            labelFn = maidenheadSquare;
-        }
-
-        const startLon = Math.floor((minLon + 180) / stepLon) * stepLon - 180;
-        const endLon = Math.ceil((maxLon + 180) / stepLon) * stepLon - 180;
-        const startLat = Math.floor((minLat + 90) / stepLat) * stepLat - 90;
-        const endLat = Math.ceil((maxLat + 90) / stepLat) * stepLat - 90;
-
-        const features = [];
-
-        for (let lon = startLon; lon < endLon; lon += stepLon) {
-            for (let lat = startLat; lat < endLat; lat += stepLat) {
-                const lon2 = lon + stepLon;
-                const lat2 = lat + stepLat;
-
-                const ring = [
-                    [lon, lat],
-                    [lon2, lat],
-                    [lon2, lat2],
-                    [lon, lat2],
-                    [lon, lat]
-                ].map(c => ol.proj.fromLonLat(c));
-
-                const polygon = new ol.geom.Polygon([ring]);
-
-                const centerLon = lon + stepLon / 2;
-                const centerLat = lat + stepLat / 2;
-
-                features.push(new ol.Feature({
-                    geometry: polygon,
-                    label: labelFn(centerLon, centerLat)
-                }));
-            }
-        }
-
-        return features;
-    }
-
-    /************************************************************
-     *  MAPA – vrstvy
-     ************************************************************/
+    // Map + layers
     const osmLayer = new ol.layer.Tile({ source: new ol.source.OSM() });
 
     const gridSource = new ol.source.Vector();
@@ -431,55 +192,134 @@
     });
 
     /************************************************************
-     *  QTH + helpers
+     *  Tooltip (hover 2s nad cílem)
      ************************************************************/
-    function setQthFromLonLat(lon, lat) {
-        const locator6 = maidenheadSubsquare(lon, lat);
+    const tooltipEl = document.createElement('div');
+    tooltipEl.className = 'qrb-tooltip';
+    tooltipEl.style.display = 'none';
 
-        qthSource.clear(true);
-        qthSource.addFeature(new ol.Feature({
-            geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
-            label: `QTH ${locator6}`
-        }));
+    const tooltipOverlay = new ol.Overlay({
+        element: tooltipEl,
+        offset: [12, -12],
+        positioning: 'bottom-left',
+        stopEvent: false
+    });
+    map.addOverlay(tooltipOverlay);
 
-        qthInput.value = locator6;
-        return locator6;
+    let hoverTimer = null;
+    let hoverFeature = null;
+    let hoverPixelKey = null;
+
+    function escapeHtml(s) {
+        return String(s ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
     }
 
-    function setQthFromLocator(locator) {
-        const extentWGS84 = locatorToExtentWGS84(locator);
-        if (!extentWGS84) return false;
-
-        const centerLon = (extentWGS84[0] + extentWGS84[2]) / 2;
-        const centerLat = (extentWGS84[1] + extentWGS84[3]) / 2;
-
-        qthSource.clear(true);
-        qthSource.addFeature(new ol.Feature({
-            geometry: new ol.geom.Point(ol.proj.fromLonLat([centerLon, centerLat])),
-            label: `QTH ${String(locator).trim()}`
-        }));
-
-        return true;
+    function fmt(val) {
+        const s = String(val ?? '').trim();
+        return s ? s : null;
     }
 
-    function clearQth() {
-        qthSource.clear(true);
+    function formatExchange(report, code, locator) {
+        const parts = [fmt(report), fmt(code), fmt(locator)].filter(Boolean);
+        return parts.length ? parts.join(' ') : null;
     }
 
-    function getQthLonLatOrNull() {
-        const feats = qthSource.getFeatures();
-        if (!feats.length) return null;
-        const c3857 = feats[0].getGeometry().getCoordinates();
-        return ol.proj.toLonLat(c3857);
+    function setTooltipContentForFeature(feature) {
+        const locator = feature.get('locator');
+        const call = feature.get('call');
+        const km = feature.get('km');
+        const qso = feature.get('qso'); // objekt z EDI (pokud je)
+
+        const dxccEntityCode = feature.get('dxccEntityCode');
+        const dxccName = feature.get('dxccName');
+
+        // Pokud nejsou detaily, zobraz jen lokátor (+ případně DXCC, pokud je)
+        if (!qso) {
+            const lines = [];
+            lines.push(`<div class="title">${escapeHtml(locator || '')}</div>`);
+
+            if (dxccEntityCode && dxccName) {
+                lines.push(
+                    `<div class="line"><span class="key">DXCC</span><span class="val">${escapeHtml(String(dxccEntityCode))} — ${escapeHtml(dxccName)}</span></div>`
+                );
+            }
+
+            tooltipEl.innerHTML = lines.join('');
+            return;
+        }
+
+        const title = call ? call : (locator || '');
+        const lines = [];
+        lines.push(`<div class="title">${escapeHtml(title)}</div>`);
+
+        // Rozšíření hintu: DXCC entita + země
+        if (dxccEntityCode && dxccName) {
+            lines.push(
+                `<div class="line"><span class="key">DXCC</span><span class="val">${escapeHtml(String(dxccEntityCode))} — ${escapeHtml(dxccName)}</span></div>`
+            );
+        }
+
+        // Date + Time
+        const dt = [fmt(qso.date), fmt(qso.time)].filter(Boolean).join(' ');
+        if (dt) {
+            lines.push(`<div class="line"><span class="key">Date/Time</span><span class="val">${escapeHtml(dt)}</span></div>`);
+        }
+
+        // Mode
+        if (fmt(qso.mode)) {
+            lines.push(`<div class="line"><span class="key">Mode</span><span class="val">${escapeHtml(qso.mode)}</span></div>`);
+        }
+
+        // Sent/Received ve formátu: "59 005 JO88WX" (SSB) nebo "599 005 JO88WX" (CW)
+        // report je už správně (59 vs 599) z EDI
+        const sentStr = formatExchange(qso.sentReport, qso.sentContestCode, qso.myLocator);
+        if (sentStr) {
+            lines.push(`<div class="line"><span class="key">Sent</span><span class="val">${escapeHtml(sentStr)}</span></div>`);
+        } else if (fmt(qso.sentExchangeRaw)) {
+            lines.push(`<div class="line"><span class="key">Sent</span><span class="val">${escapeHtml(qso.sentExchangeRaw)}</span></div>`);
+        }
+
+        const rcvdStr = formatExchange(qso.rcvReport, qso.rcvContestCode, qso.locator);
+        if (rcvdStr) {
+            lines.push(`<div class="line"><span class="key">Rcvd</span><span class="val">${escapeHtml(rcvdStr)}</span></div>`);
+        } else if (fmt(qso.rcvExchangeRaw)) {
+            lines.push(`<div class="line"><span class="key">Rcvd</span><span class="val">${escapeHtml(qso.rcvExchangeRaw)}</span></div>`);
+        }
+
+        // QRB
+        if (typeof km === 'number' && Number.isFinite(km)) {
+            lines.push(`<div class="line"><span class="key">QRB</span><span class="val">${escapeHtml(km.toFixed(1))} km</span></div>`);
+        }
+
+        tooltipEl.innerHTML = lines.join('');
     }
 
-    function locatorToCenterLonLat(locatorRaw) {
-        const extentWGS84 = locatorToExtentWGS84(locatorRaw);
-        if (!extentWGS84) return null;
-        return [
-            (extentWGS84[0] + extentWGS84[2]) / 2,
-            (extentWGS84[1] + extentWGS84[3]) / 2
-        ];
+    function showTooltip(feature, coordinate3857) {
+        setTooltipContentForFeature(feature);
+        tooltipOverlay.setPosition(coordinate3857);
+        tooltipEl.style.display = 'block';
+    }
+
+    function hideTooltip() {
+        tooltipEl.style.display = 'none';
+        tooltipOverlay.setPosition(undefined);
+    }
+
+    function clearHoverTimer() {
+        if (hoverTimer) {
+            clearTimeout(hoverTimer);
+            hoverTimer = null;
+        }
+    }
+
+    // Helpers
+    function isValidTargetLocator6(loc) {
+        return /^[A-R]{2}[0-9]{2}[A-X]{2}$/.test(loc);
     }
 
     function haversineKm(lon1, lat1, lon2, lat2) {
@@ -493,61 +333,53 @@
         return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
     }
 
-    /************************************************************
-     *  Highlight "search locator"
-     ************************************************************/
-    function highlightLocator(locator) {
-        const extentWGS84 = locatorToExtentWGS84(locator);
-        if (!extentWGS84) return false;
+    function getQthLonLatOrNull() {
+        const feats = qthSource.getFeatures();
+        if (!feats.length) return null;
+        return ol.proj.toLonLat(feats[0].getGeometry().getCoordinates());
+    }
 
-        const extent3857 = ol.proj.transformExtent(extentWGS84, 'EPSG:4326', 'EPSG:3857');
-
-        const ring = [
-            [extentWGS84[0], extentWGS84[1]],
-            [extentWGS84[2], extentWGS84[1]],
-            [extentWGS84[2], extentWGS84[3]],
-            [extentWGS84[0], extentWGS84[3]],
-            [extentWGS84[0], extentWGS84[1]]
-        ].map(c => ol.proj.fromLonLat(c));
-
-        highlightSource.clear(true);
-        highlightSource.addFeature(new ol.Feature({
-            geometry: new ol.geom.Polygon([ring])
+    function setQthFromLonLat(lon, lat) {
+        const locator6 = maidenheadSubsquare(lon, lat);
+        qthSource.clear(true);
+        qthSource.addFeature(new ol.Feature({
+            geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
+            label: `QTH ${locator6}`
         }));
+        ui.qthInput.value = locator6;
+        return locator6;
+    }
 
-        view.fit(extent3857, { padding: [80, 80, 80, 80], duration: 450, maxZoom: 14 });
+    function setQthFromLocator(locator) {
+        const ext = locatorToExtentWGS84(locator);
+        if (!ext) return false;
+        const lon = (ext[0] + ext[2]) / 2;
+        const lat = (ext[1] + ext[3]) / 2;
+        qthSource.clear(true);
+        qthSource.addFeature(new ol.Feature({
+            geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
+            label: `QTH ${String(locator).trim()}`
+        }));
         return true;
     }
 
-    /************************************************************
-     *  Links QTH -> targets
-     ************************************************************/
     function refreshLinks() {
         linksSource.clear(true);
-
         const qthLL = getQthLonLatOrNull();
         if (!qthLL) return;
 
-        const targetFeatures = targetsSource.getFeatures();
-        if (!targetFeatures.length) return;
-
         const qth3857 = ol.proj.fromLonLat(qthLL);
-
-        for (const f of targetFeatures) {
-            const p = f.getGeometry();
-            if (!p) continue;
-            const coords = p.getCoordinates(); // EPSG:3857
+        for (const f of targetsSource.getFeatures()) {
+            const coords = f.getGeometry()?.getCoordinates();
+            if (!coords) continue;
             linksSource.addFeature(new ol.Feature({
                 geometry: new ol.geom.LineString([qth3857, coords])
             }));
         }
     }
 
-    /************************************************************
-     *  Grid render + toggle
-     ************************************************************/
     function pickLevel() {
-        const mode = modeSelect.value;
+        const mode = ui.modeSelect.value;
         if (mode === "field" || mode === "square" || mode === "subsquare") return mode;
 
         const z = view.getZoom() ?? 0;
@@ -556,15 +388,13 @@
     }
 
     function refreshGrid() {
-        const t = i18n[currentLang] || i18n.cs;
-
         const zNum = view.getZoom();
         const zTxt = (typeof zNum === 'number') ? zNum.toFixed(1) : '?';
 
-        if (!gridToggle.checked) {
+        if (!ui.gridToggle.checked) {
             gridLayer.setVisible(false);
             gridSource.clear(true);
-            statusEl.textContent = t.msgGridOff(zTxt);
+            ui.statusEl.textContent = t().msgGridOff(zTxt);
             return;
         }
 
@@ -588,22 +418,7 @@
         gridSource.clear(true);
         gridSource.addFeatures(features);
 
-        statusEl.textContent = t.msgGridOn(zTxt, effectiveLevel.toUpperCase(), features.length);
-    }
-
-    let gridTimer = null;
-    map.on('moveend', () => {
-        clearTimeout(gridTimer);
-        gridTimer = setTimeout(refreshGrid, 120);
-    });
-    modeSelect.addEventListener('change', refreshGrid);
-    gridToggle.addEventListener('change', refreshGrid);
-
-    /************************************************************
-     *  Targets (textarea) + list + distances
-     ************************************************************/
-    function isValidTargetLocator6(loc) {
-        return /^[A-R]{2}[0-9]{2}[A-X]{2}$/.test(loc);
+        ui.statusEl.textContent = t().msgGridOn(zTxt, effectiveLevel.toUpperCase(), features.length);
     }
 
     function parseTargetsText(text) {
@@ -625,23 +440,20 @@
     }
 
     function renderLocatorList(items) {
-        const t = i18n[currentLang] || i18n.cs;
-
-        locatorListEl.innerHTML = '';
+        ui.locatorListEl.innerHTML = '';
         for (const it of items) {
             const li = document.createElement('li');
             const kmTxt = (typeof it.km === 'number')
                 ? ` — ${it.km.toFixed(1)} km`
-                : ` ${t.msgNeedQthForDist}`;
-            li.innerHTML = `<code>${it.loc}</code>${kmTxt}`;
-            locatorListEl.appendChild(li);
+                : ` ${t().msgNeedQthForDist}`;
+
+            li.innerHTML = `<code>${it.display}</code>${kmTxt}`;
+            ui.locatorListEl.appendChild(li);
         }
     }
 
     function plotTargetsFromTextarea() {
-        const t = i18n[currentLang] || i18n.cs;
-
-        const locs = parseTargetsText(targetsTextarea.value);
+        const locs = parseTargetsText(ui.targetsTextarea.value);
         const valid = [];
         const invalid = [];
 
@@ -651,7 +463,6 @@
         }
 
         const qthLL = getQthLonLatOrNull();
-
         targetsSource.clear(true);
 
         const listItems = [];
@@ -662,24 +473,39 @@
             const [lon, lat] = center;
             const km = qthLL ? haversineKm(qthLL[0], qthLL[1], lon, lat) : null;
 
+            const imported = importedByLocator.get(loc); // {call,qso} nebo undefined
+            const call = imported?.call || null;
+            const qso = imported?.qso || null;
+
+            // DXCC lookup podle prefixů (prefix == začátek značky)
+            const dxcc = (call && dxccIndex)
+                ? findDxccByCall(call, dxccIndex, { includeDeleted: false })
+                : null;
+
+            const display = call ? call : loc;
+
             targetsSource.addFeature(new ol.Feature({
                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
-                label: qthLL ? `${loc} (${km.toFixed(0)} km)` : loc,
+                label: qthLL ? `${display} (${km.toFixed(0)} km)` : display,
                 locator: loc,
-                km
+                call,
+                qso,
+                km,
+                dxccEntityCode: dxcc?.entityCode ?? null,
+                dxccName: dxcc?.name ?? null
             }));
 
-            listItems.push({ loc, km });
+            listItems.push({ loc, display, km });
         }
 
         renderLocatorList(listItems);
 
         if (invalid.length) {
-            statusEl.textContent = t.msgInvalidLines(
+            ui.statusEl.textContent = t().msgInvalidLines(
                 invalid.slice(0, 8).join(', ') + (invalid.length > 8 ? '…' : '')
             );
         } else {
-            statusEl.textContent = t.msgShownLocs(valid.length, Boolean(qthLL));
+            ui.statusEl.textContent = t().msgShownLocs(valid.length, Boolean(qthLL));
         }
 
         if (valid.length) {
@@ -700,133 +526,60 @@
         plotTargetsFromTextarea();
     }
 
-    /************************************************************
-     *  Import EDI (Atalanta format)
-     ************************************************************/
-    function parseEdiText(text) {
-        const lines = String(text || '').split(/\r?\n/);
+    // Search highlight
+    function highlightLocator(locator) {
+        const ext = locatorToExtentWGS84(locator);
+        if (!ext) return false;
 
-        let section = '';
-        let myLocator = null;
-        const locators = [];
+        const ext3857 = ol.proj.transformExtent(ext, 'EPSG:4326', 'EPSG:3857');
 
-        for (const raw of lines) {
-            const line = raw.trim();
-            if (!line) continue;
+        const ring = [
+            [ext[0], ext[1]],
+            [ext[2], ext[1]],
+            [ext[2], ext[3]],
+            [ext[0], ext[3]],
+            [ext[0], ext[1]]
+        ].map(c => ol.proj.fromLonLat(c));
 
-            const mSec = line.match(/^\[(.+)\]$/);
-            if (mSec) {
-                section = mSec[1].toUpperCase();
-                continue;
-            }
+        highlightSource.clear(true);
+        highlightSource.addFeature(new ol.Feature({
+            geometry: new ol.geom.Polygon([ring])
+        }));
 
-            if (section === 'MAIN') {
-                const m = line.match(/^LOCATOR\s*=\s*([A-Za-z0-9]+)\s*$/);
-                if (m) myLocator = m[1].toUpperCase();
-                continue;
-            }
-
-            if (section === 'QSO') {
-                const parts = line.split(';');
-                if (parts.length < 7) continue;
-                const loc = String(parts[6] || '').trim().toUpperCase();
-                if (isValidTargetLocator6(loc)) locators.push(loc);
-            }
-        }
-
-        const seen = new Set();
-        const uniqueLocs = [];
-        for (const l of locators) {
-            if (seen.has(l)) continue;
-            seen.add(l);
-            uniqueLocs.push(l);
-        }
-
-        return { myLocator, locators: uniqueLocs };
+        view.fit(ext3857, { padding: [80, 80, 80, 80], duration: 450, maxZoom: 14 });
+        return true;
     }
 
-    function importEdiFile(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onerror = () => reject(reader.error || new Error('File read error'));
-            reader.onload = () => resolve(String(reader.result || ''));
-            reader.readAsText(file);
-        });
-    }
-
-    async function doImportEdi() {
-        const t = i18n[currentLang] || i18n.cs;
-
-        const file = ediFileInput.files && ediFileInput.files[0];
-        if (!file) {
-            statusEl.textContent = t.msgPickEdi;
-            return;
-        }
-
-        try {
-            const text = await importEdiFile(file);
-            const parsed = parseEdiText(text);
-
-            if (ediSetQthCheckbox.checked && parsed.myLocator) {
-                qthInput.value = parsed.myLocator;
-                setQthFromLocator(parsed.myLocator);
-            }
-
-            if (!parsed.locators.length) {
-                statusEl.textContent = t.msgEdiNoLocs;
-                targetsTextarea.value = '';
-                targetsSource.clear(true);
-                locatorListEl.innerHTML = '';
-                refreshLinks();
-                refreshGrid();
-                return;
-            }
-
-            targetsTextarea.value = parsed.locators.join('\n');
-            plotTargetsFromTextarea();
-            refreshLinks();
-            refreshGrid();
-
-            statusEl.textContent = t.msgEdiLoaded(parsed.locators.length, parsed.myLocator);
-        } catch (err) {
-            statusEl.textContent = `EDI import failed: ${err && err.message ? err.message : String(err)}`;
-        }
-    }
-
-    /************************************************************
-     *  Kontextové menu + QTH z mapy
-     ************************************************************/
+    // Context menu
     let lastContextLonLat = null;
 
     function hideContextMenu() {
-        contextMenuEl.style.display = 'none';
+        ui.contextMenuEl.style.display = 'none';
         lastContextLonLat = null;
     }
 
     function showContextMenu(clientX, clientY) {
         const vpRect = map.getViewport().getBoundingClientRect();
-
         let x = clientX - vpRect.left;
         let y = clientY - vpRect.top;
 
-        contextMenuEl.style.display = 'block';
-        contextMenuEl.style.left = `${x}px`;
-        contextMenuEl.style.top = `${y}px`;
+        ui.contextMenuEl.style.display = 'block';
+        ui.contextMenuEl.style.left = `${x}px`;
+        ui.contextMenuEl.style.top = `${y}px`;
 
-        const menuRect = contextMenuEl.getBoundingClientRect();
+        const menuRect = ui.contextMenuEl.getBoundingClientRect();
         const overRight = menuRect.right - vpRect.right;
         const overBottom = menuRect.bottom - vpRect.bottom;
         if (overRight > 0) x = Math.max(0, x - overRight - 6);
         if (overBottom > 0) y = Math.max(0, y - overBottom - 6);
 
-        contextMenuEl.style.left = `${x}px`;
-        contextMenuEl.style.top = `${y}px`;
+        ui.contextMenuEl.style.left = `${x}px`;
+        ui.contextMenuEl.style.top = `${y}px`;
     }
 
     function onMapContextMenu(e) {
         e.preventDefault();
-        const coordinate3857 = map.getEventCoordinate(e);
-        lastContextLonLat = ol.proj.toLonLat(coordinate3857);
+        lastContextLonLat = ol.proj.toLonLat(map.getEventCoordinate(e));
         showContextMenu(e.clientX, e.clientY);
     }
 
@@ -834,19 +587,138 @@
     document.getElementById('map').addEventListener('contextmenu', onMapContextMenu);
 
     document.addEventListener('mousedown', (e) => {
-        if (contextMenuEl.style.display !== 'block') return;
-        if (!contextMenuEl.contains(e.target)) hideContextMenu();
+        if (ui.contextMenuEl.style.display !== 'block') return;
+        if (!ui.contextMenuEl.contains(e.target)) hideContextMenu();
     });
 
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') hideContextMenu();
     });
 
-    ctxAddQthBtn.addEventListener('click', () => {
+    // Events
+    ui.langSelect.addEventListener('change', () => setLanguage(ui.langSelect.value));
+
+    ui.modeSelect.addEventListener('change', refreshGrid);
+    ui.gridToggle.addEventListener('change', refreshGrid);
+
+    let gridTimer = null;
+    map.on('moveend', () => {
+        clearTimeout(gridTimer);
+        gridTimer = setTimeout(refreshGrid, 120);
+    });
+
+    ui.goLocatorBtn.addEventListener('click', () => {
+        if (!highlightLocator(ui.locatorInput.value)) ui.statusEl.textContent = t().msgBadLocator;
+        else refreshGrid();
+    });
+
+    ui.locatorInput.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        if (!highlightLocator(ui.locatorInput.value)) ui.statusEl.textContent = t().msgBadLocator;
+        else refreshGrid();
+    });
+
+    ui.clearLocatorBtn.addEventListener('click', () => {
+        highlightSource.clear(true);
+        ui.locatorInput.value = '';
+        refreshGrid();
+    });
+
+    ui.setQthBtn.addEventListener('click', () => {
+        if (!setQthFromLocator(ui.qthInput.value)) {
+            ui.statusEl.textContent = t().msgBadQth;
+            return;
+        }
+        refreshTargetsDistancesIfAny();
+        refreshLinks();
+        refreshGrid();
+    });
+
+    ui.qthInput.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        if (!setQthFromLocator(ui.qthInput.value)) {
+            ui.statusEl.textContent = t().msgBadQth;
+            return;
+        }
+        refreshTargetsDistancesIfAny();
+        refreshLinks();
+        refreshGrid();
+    });
+
+    ui.clearQthBtn.addEventListener('click', () => {
+        ui.qthInput.value = '';
+        qthSource.clear(true);
+        refreshTargetsDistancesIfAny();
+        refreshLinks();
+        refreshGrid();
+    });
+
+    ui.plotTargetsBtn.addEventListener('click', async () => {
+        await ensureDxccLoaded();
+        plotTargetsFromTextarea();
+        refreshLinks();
+        refreshGrid();
+    });
+
+    ui.clearTargetsBtn.addEventListener('click', () => {
+        ui.targetsTextarea.value = '';
+        targetsSource.clear(true);
+        ui.locatorListEl.innerHTML = '';
+        importedByLocator = new Map();
+        hideTooltip();
+        refreshLinks();
+        refreshGrid();
+    });
+
+    ui.importEdiBtn.addEventListener('click', async () => {
+        const file = ui.ediFileInput.files && ui.ediFileInput.files[0];
+        if (!file) {
+            ui.statusEl.textContent = t().msgPickEdi;
+            return;
+        }
+
+        try {
+            const text = await importEdiFile(file);
+            const parsed = parseEdiText(text, isValidTargetLocator6);
+
+            if (ui.ediSetQthCheckbox.checked && parsed.myLocator) {
+                ui.qthInput.value = parsed.myLocator;
+                setQthFromLocator(parsed.myLocator);
+            }
+
+            if (!parsed.targets.length) {
+                ui.statusEl.textContent = t().msgEdiNoLocs;
+                ui.targetsTextarea.value = '';
+                targetsSource.clear(true);
+                ui.locatorListEl.innerHTML = '';
+                importedByLocator = new Map();
+                hideTooltip();
+                refreshLinks();
+                refreshGrid();
+                return;
+            }
+
+            // locator -> {call,qso}
+            importedByLocator = new Map(
+                parsed.targets.map(x => [x.locator, { call: (x.call || '').toUpperCase() || null, qso: x.qso || null }])
+            );
+
+            ui.targetsTextarea.value = parsed.targets.map(x => x.locator).join('\n');
+
+            await ensureDxccLoaded();
+
+            plotTargetsFromTextarea();
+            refreshLinks();
+            refreshGrid();
+
+            ui.statusEl.textContent = t().msgEdiLoaded(parsed.targets.length, parsed.myLocator);
+        } catch (err) {
+            ui.statusEl.textContent = `EDI import failed: ${err && err.message ? err.message : String(err)}`;
+        }
+    });
+
+    ui.ctxAddQthBtn.addEventListener('click', () => {
         if (!lastContextLonLat) return;
-
-        const t = i18n[currentLang] || i18n.cs;
-
         const [lon, lat] = lastContextLonLat;
         const locator6 = setQthFromLonLat(lon, lat);
 
@@ -855,156 +727,69 @@
         refreshLinks();
         refreshGrid();
 
-        statusEl.textContent = t.msgQthFromMap(locator6, lon.toFixed(5), lat.toFixed(5));
+        ui.statusEl.textContent = t().msgQthFromMap(locator6, lon.toFixed(5), lat.toFixed(5));
+    });
+
+    ui.ctxExportPngBtn.addEventListener('click', () => {
+        exportMapAsPng({ map, hideContextMenu });
     });
 
     /************************************************************
-     *  Export mapy do PNG
+     *  Hover detekce nad cílovými body: 2s -> tooltip
      ************************************************************/
-    function exportMapAsPng() {
-        hideContextMenu();
-
-        map.once('rendercomplete', () => {
-            const mapCanvas = document.createElement('canvas');
-            const size = map.getSize();
-            mapCanvas.width = size[0];
-            mapCanvas.height = size[1];
-
-            const mapContext = mapCanvas.getContext('2d');
-
-            const canvases = map.getViewport().querySelectorAll('canvas');
-
-            canvases.forEach((canvas) => {
-                if (canvas.width === 0 || canvas.height === 0) return;
-
-                const opacity = canvas.parentNode && canvas.parentNode.style
-                    ? canvas.parentNode.style.opacity
-                    : canvas.style.opacity;
-
-                mapContext.globalAlpha = opacity === '' ? 1 : Number(opacity);
-
-                const transform = canvas.style.transform;
-                if (transform && transform.startsWith('matrix(')) {
-                    const values = transform
-                        .slice(7, -1)
-                        .split(',')
-                        .map(v => Number(v.trim()));
-                    mapContext.setTransform(values[0], values[1], values[2], values[3], values[4], values[5]);
-                } else {
-                    mapContext.setTransform(1, 0, 0, 1, 0, 0);
-                }
-
-                mapContext.drawImage(canvas, 0, 0);
-            });
-
-            mapContext.setTransform(1, 0, 0, 1, 0, 0);
-            mapContext.globalAlpha = 1;
-
-            mapCanvas.toBlob((blob) => {
-                if (!blob) return;
-
-                const now = new Date();
-                const pad = (n) => String(n).padStart(2, '0');
-                const filename =
-                    `qrb-map-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
-
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = filename;
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-
-                setTimeout(() => URL.revokeObjectURL(link.href), 1500);
-            }, 'image/png');
-        });
-
-        map.renderSync();
-    }
-
-    if (ctxExportPngBtn) {
-        ctxExportPngBtn.addEventListener('click', () => exportMapAsPng());
-    }
-
-    /************************************************************
-     *  UI events
-     ************************************************************/
-    document.getElementById('fit').addEventListener('click', () => {
-        view.fit(zlinskyExtent3857, { padding: [40, 40, 40, 40], duration: 400 });
-    });
-
-    function doLocatorSearch() {
-        const t = i18n[currentLang] || i18n.cs;
-
-        const ok = highlightLocator(locatorInput.value);
-        if (!ok) {
-            statusEl.textContent = t.msgBadLocator;
+    map.on('pointermove', (evt) => {
+        if (evt.dragging) {
+            clearHoverTimer();
+            hoverFeature = null;
+            hoverPixelKey = null;
+            hideTooltip();
             return;
         }
-        refreshGrid();
-    }
 
-    goLocatorBtn.addEventListener('click', doLocatorSearch);
-    locatorInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doLocatorSearch();
-    });
+        const feature = map.forEachFeatureAtPixel(
+            evt.pixel,
+            (f, layer) => (layer === targetsLayer ? f : null),
+            { hitTolerance: 6 }
+        );
 
-    clearLocatorBtn.addEventListener('click', () => {
-        highlightSource.clear(true);
-        locatorInput.value = '';
-        refreshGrid();
-    });
-
-    function applyQth() {
-        const t = i18n[currentLang] || i18n.cs;
-
-        const ok = setQthFromLocator(qthInput.value);
-        if (!ok) {
-            statusEl.textContent = t.msgBadQth;
+        if (!feature) {
+            clearHoverTimer();
+            hoverFeature = null;
+            hoverPixelKey = null;
+            hideTooltip();
             return;
         }
-        refreshTargetsDistancesIfAny();
-        refreshLinks();
-        refreshGrid();
-    }
 
-    setQthBtn.addEventListener('click', applyQth);
-    qthInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') applyQth();
+        const pixKey = `${evt.pixel[0]}:${evt.pixel[1]}`;
+        if (hoverFeature === feature && hoverPixelKey === pixKey) return;
+
+        clearHoverTimer();
+        hideTooltip();
+        hoverFeature = feature;
+        hoverPixelKey = pixKey;
+
+        const coordinate = evt.coordinate;
+        hoverTimer = setTimeout(() => {
+            if (hoverFeature !== feature) return;
+            showTooltip(feature, coordinate);
+        }, 1000);
     });
 
-    clearQthBtn.addEventListener('click', () => {
-        qthInput.value = '';
-        clearQth();
-        refreshTargetsDistancesIfAny();
-        refreshLinks();
-        refreshGrid();
+    map.on('movestart', () => {
+        clearHoverTimer();
+        hoverFeature = null;
+        hoverPixelKey = null;
+        hideTooltip();
     });
 
-    plotTargetsBtn.addEventListener('click', () => {
-        plotTargetsFromTextarea();
-        refreshLinks();
-        refreshGrid();
-    });
-
-    clearTargetsBtn.addEventListener('click', () => {
-        targetsTextarea.value = '';
-        targetsSource.clear(true);
-        locatorListEl.innerHTML = '';
-        refreshLinks();
-        refreshGrid();
-    });
-
-    importEdiBtn.addEventListener('click', doImportEdi);
-
-    /************************************************************
-     *  Initial
-     ************************************************************/
+    // Initial
     setLanguage(currentLang);
-
-    if (panelBodyEl) panelBodyEl.style.display = isPanelCollapsed() ? 'none' : 'block';
-
+    if (ui.panelBodyEl) ui.panelBodyEl.style.display = isPanelCollapsed() ? 'none' : 'block';
     view.fit(zlinskyExtent3857, { padding: [40, 40, 40, 40] });
+
+    // načti DXCC na pozadí (neblokuje start)
+    ensureDxccLoaded();
+
     refreshGrid();
     refreshLinks();
 })();
