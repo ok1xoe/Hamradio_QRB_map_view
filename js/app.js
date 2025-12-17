@@ -8,6 +8,7 @@ import {
 
 import { createI18n, applyTranslations, normalizeLang } from './i18n.js';
 import { parseEdiText, importEdiFile } from './edi.js';
+import { parseAdifText, importAdifFile } from './adif.js';
 import { exportMapAsPng } from './exportPng.js';
 import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
@@ -68,6 +69,11 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     // Pokud je prázdná, zobrazujeme lokátory.
     let importedByLocator = new Map();
 
+    // import režim pro cíle:
+    // - 'LOC' = lokátory z textarea (ručně / EDI lokátory)
+    // - 'ADIF' = cíle jsou DXCC entity (dle prefixů)
+    let targetsMode = 'LOC';
+
     // DXCC index (načte se lazy a cachuje se)
     let dxccIndex = null;
     let dxccIndexPromise = null;
@@ -97,7 +103,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     function isPanelCollapsed() {
-        return ui.controlPanel.classList.contains('collapsed');
+        return ui.controlPanel?.classList?.contains('collapsed');
     }
 
     function positionLayersPanel() {
@@ -120,8 +126,8 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
     function setLanguage(lang) {
         currentLang = normalizeLang(lang);
-        ui.langSelect.value = currentLang;
-        applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed });
+        if (ui.langSelect) ui.langSelect.value = currentLang;
+        applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed: () => isPanelCollapsed() });
         refreshGrid();
 
         // texty mohou změnit výšku panelu -> přepozicovat vrstvy
@@ -136,7 +142,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
             const collapsed = ui.controlPanel.classList.toggle('collapsed');
             ui.panelBodyEl.style.display = collapsed ? 'none' : 'block';
-            applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed });
+            applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed: () => isPanelCollapsed() });
 
             positionLayersPanel();
         });
@@ -239,7 +245,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     qsoGroupLayer.setZIndex(8);
 
     function detectQsoModeFromModeField(qso) {
-        // Určení módu podle atributu Mode (qso.mode)
         const m = String(qso?.mode ?? '').trim().toUpperCase();
         if (!m) return 'OTHER';
 
@@ -258,27 +263,96 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         return false;
     }
 
+    function getDxccFeatureByEntityCode(entityCode) {
+        const codeNum = Number(entityCode);
+        if (!Number.isFinite(codeNum)) return null;
+
+        const feats = dxccGeomSource.getFeatures() || [];
+        for (const f of feats) {
+            const props = f.getProperties() || {};
+            const c = Number(props.dxcc_entity_code);
+            if (Number.isFinite(c) && c === codeNum) return f;
+        }
+        return null;
+    }
+
+    function getDxccCenter3857ByEntityCode(entityCode) {
+        const f = getDxccFeatureByEntityCode(entityCode);
+        if (!f) return null;
+
+        const geom = f.getGeometry();
+        if (!geom) return null;
+
+        const ext = geom.getExtent();
+        if (!ext || !ext.every(Number.isFinite)) return null;
+
+        return ol.extent.getCenter(ext);
+    }
+
+    function getDxccEntityCodeAtCoordinate3857(coord3857) {
+        const feats = dxccGeomSource.getFeatures() || [];
+        for (const f of feats) {
+            const geom = f.getGeometry();
+            if (!geom) continue;
+
+            if (geom.intersectsCoordinate(coord3857)) {
+                const props = f.getProperties() || {};
+                const code = Number(props.dxcc_entity_code);
+                if (Number.isFinite(code)) return code;
+            }
+        }
+        return null;
+    }
+
+    function getQthLonLatOrNull() {
+        const feats = qthSource.getFeatures();
+        if (!feats.length) return null;
+        return ol.proj.toLonLat(feats[0].getGeometry().getCoordinates());
+    }
+
+    function getQsoOrigin3857OrNull() {
+        // V režimu ADIF chceme střed DXCC země, kde leží bod QTH
+        if (targetsMode === 'ADIF') {
+            const qthLL = getQthLonLatOrNull();
+            if (!qthLL) return null;
+
+            const qth3857 = ol.proj.fromLonLat(qthLL);
+
+            const myEntity = getDxccEntityCodeAtCoordinate3857(qth3857);
+            if (myEntity != null) {
+                const c = getDxccCenter3857ByEntityCode(myEntity);
+                if (c) return c;
+            }
+
+            // fallback: pokud QTH neleží v žádné DXCC geometrii, použij bod QTH
+            return qth3857;
+        }
+
+        // default: bod QTH
+        const qthLL = getQthLonLatOrNull();
+        if (!qthLL) return null;
+        return ol.proj.fromLonLat(qthLL);
+    }
+
     function refreshQsoLinks() {
         qsoCwSource.clear(true);
         qsoSsbSource.clear(true);
         qsoOtherSource.clear(true);
 
-        const qthLL = getQthLonLatOrNull();
-        if (!qthLL) return;
-
-        const qth3857 = ol.proj.fromLonLat(qthLL);
+        const origin3857 = getQsoOrigin3857OrNull();
+        if (!origin3857) return;
 
         for (const f of targetsSource.getFeatures()) {
             const coords = f.getGeometry()?.getCoordinates();
             if (!coords) continue;
 
             const qso = f.get('qso');
-            if (!qso) continue; // jen skutečná QSO (z EDI)
+            if (!qso) continue; // jen skutečná QSO (EDI/ADIF)
 
             const mode = f.get('qsoMode') || detectQsoModeFromModeField(qso);
 
             const line = new ol.Feature({
-                geometry: new ol.geom.LineString([qth3857, coords]),
+                geometry: new ol.geom.LineString([origin3857, coords]),
                 locator: f.get('locator') || null,
                 call: f.get('call') || null,
                 mode
@@ -295,11 +369,10 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
         for (const f of targetsSource.getFeatures()) {
             const qso = f.get('qso');
-            if (!qso) continue; // jen spojení (EDI)
+            if (!qso) continue; // jen spojení (EDI/ADIF)
 
             const mode = f.get('qsoMode') || detectQsoModeFromModeField(qso);
 
-            // když uživatel vypne CW/SSB/OTHER, nesmí se to počítat do DXCC „worked“
             if (!isQsoModeVisible(mode)) continue;
 
             const code = Number(f.get('dxccEntityCode'));
@@ -323,7 +396,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         const anyOn = (cw || ssb || other);
         const allOn = (cw && ssb && other);
 
-        // parent: checked pokud je něco vidět; indeterminate pokud není jednotný stav
         ui.layerQsoCheckbox.indeterminate = (anyOn && !allOn);
         ui.layerQsoCheckbox.checked = anyOn;
     }
@@ -334,7 +406,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         qsoOtherLayer.setVisible(vis);
         setQsoCheckboxStateFromLayers();
 
-        // změna viditelnosti QSO -> musí schovat i puntíky + přepočítat DXCC
         targetsSource.changed();
         rebuildWorkedDxccSetFromVisibleQsos();
     }
@@ -369,7 +440,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             const qso = feature.get('qso');
             const qsoMode = feature.get('qsoMode');
 
-            // „puntík spojení“ musí zmizet, když se vypne CW/SSB/OTHER
             if (qso && qsoMode && !isQsoModeVisible(qsoMode)) return null;
 
             return new ol.style.Style({
@@ -428,7 +498,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     });
 
     /************************************************************
-     *  Tooltip (hover 2s nad cílem)
+     *  Tooltip (hover nad cílem)
      ************************************************************/
     const tooltipEl = document.createElement('div');
     tooltipEl.className = 'qrb-tooltip';
@@ -469,12 +539,11 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         const locator = feature.get('locator');
         const call = feature.get('call');
         const km = feature.get('km');
-        const qso = feature.get('qso'); // objekt z EDI (pokud je)
+        const qso = feature.get('qso'); // objekt z EDI/ADIF (pokud je)
 
         const dxccEntityCode = feature.get('dxccEntityCode');
         const dxccName = feature.get('dxccName');
 
-        // Pokud nejsou detaily, zobraz jen lokátor (+ případně DXCC)
         if (!qso) {
             const lines = [];
             lines.push(`<div class="title">${escapeHtml(locator || '')}</div>`);
@@ -493,7 +562,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         const lines = [];
         lines.push(`<div class="title">${escapeHtml(title)}</div>`);
 
-        // DXCC (rozšíření hintu)
         if (dxccEntityCode && dxccName) {
             lines.push(
                 `<div class="line"><span class="key">DXCC</span><span class="val">${escapeHtml(String(dxccEntityCode))} — ${escapeHtml(dxccName)}</span></div>`
@@ -564,12 +632,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
     }
 
-    function getQthLonLatOrNull() {
-        const feats = qthSource.getFeatures();
-        if (!feats.length) return null;
-        return ol.proj.toLonLat(feats[0].getGeometry().getCoordinates());
-    }
-
     function setQthFromLonLat(lon, lat) {
         const locator6 = maidenheadSubsquare(lon, lat);
         qthSource.clear(true);
@@ -577,7 +639,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
             label: `QTH ${locator6}`
         }));
-        ui.qthInput.value = locator6;
+        if (ui.qthInput) ui.qthInput.value = locator6;
         return locator6;
     }
 
@@ -595,7 +657,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     function pickLevel() {
-        const mode = ui.modeSelect.value;
+        const mode = ui.modeSelect?.value;
         if (mode === "field" || mode === "square" || mode === "subsquare") return mode;
 
         const z = view.getZoom() ?? 0;
@@ -604,6 +666,8 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     function refreshGrid() {
+        if (!ui.statusEl || !ui.gridToggle) return;
+
         const zNum = view.getZoom();
         const zTxt = (typeof zNum === 'number') ? zNum.toFixed(1) : '?';
 
@@ -656,6 +720,8 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     function renderLocatorList(items) {
+        if (!ui.locatorListEl) return;
+
         ui.locatorListEl.innerHTML = '';
         for (const it of items) {
             const li = document.createElement('li');
@@ -669,7 +735,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     function plotTargetsFromTextarea() {
-        const locs = parseTargetsText(ui.targetsTextarea.value);
+        const locs = parseTargetsText(ui.targetsTextarea?.value);
         const valid = [];
         const invalid = [];
 
@@ -695,7 +761,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
             const qsoMode = qso ? detectQsoModeFromModeField(qso) : null;
 
-            // DXCC lookup podle prefixů (prefix == začátek značky)
             const dxcc = (call && dxccIndex)
                 ? findDxccByCall(call, dxccIndex, { includeDeleted: false })
                 : null;
@@ -721,16 +786,16 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
         refreshQsoLinks();
         rebuildWorkedDxccSetFromVisibleQsos();
-
-        // překreslit puntíky (styl je závislý na visible CW/SSB/OTHER)
         targetsSource.changed();
 
-        if (invalid.length) {
-            ui.statusEl.textContent = t().msgInvalidLines(
-                invalid.slice(0, 8).join(', ') + (invalid.length > 8 ? '…' : '')
-            );
-        } else {
-            ui.statusEl.textContent = t().msgShownLocs(valid.length, Boolean(qthLL));
+        if (ui.statusEl) {
+            if (invalid.length) {
+                ui.statusEl.textContent = t().msgInvalidLines(
+                    invalid.slice(0, 8).join(', ') + (invalid.length > 8 ? '…' : '')
+                );
+            } else {
+                ui.statusEl.textContent = t().msgShownLocs(valid.length, Boolean(qthLL));
+            }
         }
 
         if (valid.length) {
@@ -752,7 +817,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         plotTargetsFromTextarea();
     }
 
-    // Search highlight
     function highlightLocator(locator) {
         const ext = locatorToExtentWGS84(locator);
         if (!ext) return false;
@@ -780,11 +844,13 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     let lastContextLonLat = null;
 
     function hideContextMenu() {
-        ui.contextMenuEl.style.display = 'none';
+        if (ui.contextMenuEl) ui.contextMenuEl.style.display = 'none';
         lastContextLonLat = null;
     }
 
     function showContextMenu(clientX, clientY) {
+        if (!ui.contextMenuEl) return;
+
         const vpRect = map.getViewport().getBoundingClientRect();
         let x = clientX - vpRect.left;
         let y = clientY - vpRect.top;
@@ -810,9 +876,12 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     map.getViewport().addEventListener('contextmenu', onMapContextMenu);
-    document.getElementById('map').addEventListener('contextmenu', onMapContextMenu);
+
+    const mapEl = document.getElementById('map');
+    if (mapEl) mapEl.addEventListener('contextmenu', onMapContextMenu);
 
     document.addEventListener('mousedown', (e) => {
+        if (!ui.contextMenuEl) return;
         if (ui.contextMenuEl.style.display !== 'block') return;
         if (!ui.contextMenuEl.contains(e.target)) hideContextMenu();
     });
@@ -821,16 +890,15 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         if (e.key === 'Escape') hideContextMenu();
     });
 
-    // Events
-    ui.langSelect.addEventListener('change', () => setLanguage(ui.langSelect.value));
-
-    ui.modeSelect.addEventListener('change', refreshGrid);
-    ui.gridToggle.addEventListener('change', refreshGrid);
+    // -------- Events (opraveno: vše přes null-check) --------
+    if (ui.langSelect) ui.langSelect.addEventListener('change', () => setLanguage(ui.langSelect.value));
+    if (ui.modeSelect) ui.modeSelect.addEventListener('change', refreshGrid);
+    if (ui.gridToggle) ui.gridToggle.addEventListener('change', refreshGrid);
 
     // Panel vrstev (tree)
     if (ui.layerMapCheckbox) {
         ui.layerMapCheckbox.checked = true;
-        ui.layerMapCheckbox.disabled = true; // Mapa nepůjde vypnout
+        ui.layerMapCheckbox.disabled = true;
     }
 
     if (ui.layerDxccCheckbox) {
@@ -843,7 +911,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     if (ui.layerQsoCheckbox && ui.layerQsoCwCheckbox && ui.layerQsoSsbCheckbox && ui.layerQsoOtherCheckbox) {
-        // init
         setQsoCheckboxStateFromLayers();
 
         ui.layerQsoCheckbox.addEventListener('change', () => {
@@ -854,8 +921,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         ui.layerQsoCwCheckbox.addEventListener('change', () => {
             qsoCwLayer.setVisible(Boolean(ui.layerQsoCwCheckbox.checked));
             setQsoCheckboxStateFromLayers();
-
-            // musí se schovat puntíky i přepočítat DXCC podle viditelných spojení
             targetsSource.changed();
             rebuildWorkedDxccSetFromVisibleQsos();
         });
@@ -863,8 +928,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         ui.layerQsoSsbCheckbox.addEventListener('change', () => {
             qsoSsbLayer.setVisible(Boolean(ui.layerQsoSsbCheckbox.checked));
             setQsoCheckboxStateFromLayers();
-
-            // musí se schovat puntíky i přepočítat DXCC podle viditelných spojení
             targetsSource.changed();
             rebuildWorkedDxccSetFromVisibleQsos();
         });
@@ -872,8 +935,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         ui.layerQsoOtherCheckbox.addEventListener('change', () => {
             qsoOtherLayer.setVisible(Boolean(ui.layerQsoOtherCheckbox.checked));
             setQsoCheckboxStateFromLayers();
-
-            // musí se schovat puntíky i přepočítat DXCC podle viditelných spojení
             targetsSource.changed();
             rebuildWorkedDxccSetFromVisibleQsos();
         });
@@ -889,154 +950,298 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         gridTimer = setTimeout(refreshGrid, 120);
     });
 
-    ui.goLocatorBtn.addEventListener('click', () => {
-        if (!highlightLocator(ui.locatorInput.value)) ui.statusEl.textContent = t().msgBadLocator;
-        else refreshGrid();
-    });
+    if (ui.goLocatorBtn) {
+        ui.goLocatorBtn.addEventListener('click', () => {
+            if (!highlightLocator(ui.locatorInput?.value)) {
+                if (ui.statusEl) ui.statusEl.textContent = t().msgBadLocator;
+            } else refreshGrid();
+        });
+    }
 
-    ui.locatorInput.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter') return;
-        if (!highlightLocator(ui.locatorInput.value)) ui.statusEl.textContent = t().msgBadLocator;
-        else refreshGrid();
-    });
+    if (ui.locatorInput) {
+        ui.locatorInput.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            if (!highlightLocator(ui.locatorInput.value)) {
+                if (ui.statusEl) ui.statusEl.textContent = t().msgBadLocator;
+            } else refreshGrid();
+        });
+    }
 
-    ui.clearLocatorBtn.addEventListener('click', () => {
-        highlightSource.clear(true);
-        ui.locatorInput.value = '';
-        refreshGrid();
-    });
+    if (ui.clearLocatorBtn) {
+        ui.clearLocatorBtn.addEventListener('click', () => {
+            highlightSource.clear(true);
+            if (ui.locatorInput) ui.locatorInput.value = '';
+            refreshGrid();
+        });
+    }
 
-    ui.setQthBtn.addEventListener('click', () => {
-        if (!setQthFromLocator(ui.qthInput.value)) {
-            ui.statusEl.textContent = t().msgBadQth;
-            return;
-        }
-        refreshTargetsDistancesIfAny();
-        refreshGrid();
-        positionLayersPanel();
-    });
-
-    ui.qthInput.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter') return;
-        if (!setQthFromLocator(ui.qthInput.value)) {
-            ui.statusEl.textContent = t().msgBadQth;
-            return;
-        }
-        refreshTargetsDistancesIfAny();
-        refreshGrid();
-        positionLayersPanel();
-    });
-
-    ui.clearQthBtn.addEventListener('click', () => {
-        ui.qthInput.value = '';
-        qthSource.clear(true);
-        refreshTargetsDistancesIfAny();
-        refreshGrid();
-        positionLayersPanel();
-    });
-
-    ui.plotTargetsBtn.addEventListener('click', async () => {
-        await ensureDxccLoaded();
-        await ensureDxccGeometryLoaded();
-        plotTargetsFromTextarea();
-        refreshGrid();
-        positionLayersPanel();
-    });
-
-    ui.clearTargetsBtn.addEventListener('click', () => {
-        ui.targetsTextarea.value = '';
-        targetsSource.clear(true);
-        ui.locatorListEl.innerHTML = '';
-        importedByLocator = new Map();
-        hideTooltip();
-        refreshGrid();
-
-        workedDxccEntityCodes.clear();
-        dxccGeomSource.changed();
-
-        qsoCwSource.clear(true);
-        qsoSsbSource.clear(true);
-        qsoOtherSource.clear(true);
-
-        positionLayersPanel();
-    });
-
-    ui.importEdiBtn.addEventListener('click', async () => {
-        const file = ui.ediFileInput.files && ui.ediFileInput.files[0];
-        if (!file) {
-            ui.statusEl.textContent = t().msgPickEdi;
-            return;
-        }
-
-        try {
-            const text = await importEdiFile(file);
-            const parsed = parseEdiText(text, isValidTargetLocator6);
-
-            if (ui.ediSetQthCheckbox.checked && parsed.myLocator) {
-                ui.qthInput.value = parsed.myLocator;
-                setQthFromLocator(parsed.myLocator);
+    if (ui.setQthBtn) {
+        ui.setQthBtn.addEventListener('click', () => {
+            if (!setQthFromLocator(ui.qthInput?.value)) {
+                if (ui.statusEl) ui.statusEl.textContent = t().msgBadQth;
+                return;
             }
+            refreshTargetsDistancesIfAny();
+            refreshGrid();
+            positionLayersPanel();
+        });
+    }
 
-            if (!parsed.targets.length) {
-                ui.statusEl.textContent = t().msgEdiNoLocs;
-                ui.targetsTextarea.value = '';
-                targetsSource.clear(true);
-                ui.locatorListEl.innerHTML = '';
-                importedByLocator = new Map();
-                hideTooltip();
-                refreshGrid();
+    if (ui.qthInput) {
+        ui.qthInput.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            if (!setQthFromLocator(ui.qthInput.value)) {
+                if (ui.statusEl) ui.statusEl.textContent = t().msgBadQth;
+                return;
+            }
+            refreshTargetsDistancesIfAny();
+            refreshGrid();
+            positionLayersPanel();
+        });
+    }
 
-                workedDxccEntityCodes.clear();
-                dxccGeomSource.changed();
+    if (ui.clearQthBtn) {
+        ui.clearQthBtn.addEventListener('click', () => {
+            if (ui.qthInput) ui.qthInput.value = '';
+            qthSource.clear(true);
+            refreshTargetsDistancesIfAny();
+            refreshGrid();
+            positionLayersPanel();
+        });
+    }
 
-                qsoCwSource.clear(true);
-                qsoSsbSource.clear(true);
-                qsoOtherSource.clear(true);
+    if (ui.plotTargetsBtn) {
+        ui.plotTargetsBtn.addEventListener('click', async () => {
+            targetsMode = 'LOC';
+            await ensureDxccLoaded();
+            await ensureDxccGeometryLoaded();
+            plotTargetsFromTextarea();
+            refreshGrid();
+            positionLayersPanel();
+        });
+    }
 
-                positionLayersPanel();
+    if (ui.clearTargetsBtn) {
+        ui.clearTargetsBtn.addEventListener('click', () => {
+            if (ui.targetsTextarea) ui.targetsTextarea.value = '';
+            targetsSource.clear(true);
+            if (ui.locatorListEl) ui.locatorListEl.innerHTML = '';
+            importedByLocator = new Map();
+            targetsMode = 'LOC';
+            hideTooltip();
+            refreshGrid();
+
+            workedDxccEntityCodes.clear();
+            dxccGeomSource.changed();
+
+            qsoCwSource.clear(true);
+            qsoSsbSource.clear(true);
+            qsoOtherSource.clear(true);
+
+            positionLayersPanel();
+        });
+    }
+
+    if (ui.importEdiBtn) {
+        ui.importEdiBtn.addEventListener('click', async () => {
+            const file = ui.ediFileInput?.files && ui.ediFileInput.files[0];
+            if (!file) {
+                if (ui.statusEl) ui.statusEl.textContent = t().msgPickEdi;
                 return;
             }
 
-            importedByLocator = new Map(
-                parsed.targets.map(x => [x.locator, { call: (x.call || '').toUpperCase() || null, qso: x.qso || null }])
-            );
+            const name = String(file.name || '').toLowerCase();
+            const isAdif = name.endsWith('.adi') || name.endsWith('.adif');
 
-            ui.targetsTextarea.value = parsed.targets.map(x => x.locator).join('\n');
+            try {
+                await ensureDxccLoaded();
+                await ensureDxccGeometryLoaded();
 
-            await ensureDxccLoaded();
-            await ensureDxccGeometryLoaded();
+                if (isAdif) {
+                    const text = await importAdifFile(file);
+                    const rows = parseAdifText(text);
 
-            plotTargetsFromTextarea();
+                    if (!rows.length) {
+                        if (ui.statusEl) ui.statusEl.textContent = 'V ADI/ADIF jsem nenašel žádné záznamy se značkou (CALL).';
+                        positionLayersPanel();
+                        return;
+                    }
+
+                    const qthLL = getQthLonLatOrNull();
+                    if (!qthLL) {
+                        if (ui.statusEl) ui.statusEl.textContent = 'Nejdřív nastav Moje QTH (kvůli výchozímu DXCC středu).';
+                        positionLayersPanel();
+                        return;
+                    }
+
+                    targetsMode = 'ADIF';
+                    importedByLocator = new Map();
+
+                    const byEntity = new Map();
+                    let unknownDxcc = 0;
+
+                    for (const r of rows) {
+                        const call = String(r.call || '').trim().toUpperCase();
+                        if (!call) continue;
+
+                        const dx = findDxccByCall(call, dxccIndex, { includeDeleted: false });
+                        if (!dx?.entityCode) {
+                            unknownDxcc++;
+                            continue;
+                        }
+
+                        const key = Number(dx.entityCode);
+                        if (!Number.isFinite(key)) continue;
+
+                        const bucket = byEntity.get(key) || {
+                            entityCode: key,
+                            dxccName: dx.name || null,
+                            calls: new Set(),
+                            modes: new Set()
+                        };
+
+                        bucket.calls.add(call);
+                        const modeNorm = detectQsoModeFromModeField({ mode: r.mode || '' });
+                        bucket.modes.add(modeNorm || 'OTHER');
+
+                        byEntity.set(key, bucket);
+                    }
+
+                    if (!byEntity.size) {
+                        if (ui.statusEl) ui.statusEl.textContent = 'Z ADI/ADIF se nepodařilo určit žádné DXCC (prefixy).';
+                        positionLayersPanel();
+                        return;
+                    }
+
+                    targetsSource.clear(true);
+                    if (ui.targetsTextarea) ui.targetsTextarea.value = '';
+
+                    const origin3857 = getQsoOrigin3857OrNull();
+                    const originLL = origin3857 ? ol.proj.toLonLat(origin3857) : null;
+
+                    const listItems = [];
+                    for (const ent of byEntity.values()) {
+                        const center3857 = getDxccCenter3857ByEntityCode(ent.entityCode);
+                        if (!center3857) continue;
+
+                        const ll = ol.proj.toLonLat(center3857);
+                        const km = (originLL && ll)
+                            ? haversineKm(originLL[0], originLL[1], ll[0], ll[1])
+                            : null;
+
+                        const repMode = ent.modes.has('CW') ? 'CW' : (ent.modes.has('SSB') ? 'SSB' : 'OTHER');
+
+                        const labelName = ent.dxccName ? ent.dxccName : `DXCC ${ent.entityCode}`;
+                        const label = `${labelName} (${ent.calls.size})`;
+
+                        targetsSource.addFeature(new ol.Feature({
+                            geometry: new ol.geom.Point(center3857),
+                            label,
+                            locator: null,
+                            call: null,
+                            qso: { mode: repMode, source: 'ADIF' },
+                            qsoMode: repMode,
+                            km,
+                            dxccEntityCode: ent.entityCode,
+                            dxccName: ent.dxccName
+                        }));
+
+                        listItems.push({ display: labelName, km });
+                    }
+
+                    renderLocatorList(listItems);
+
+                    refreshQsoLinks();
+                    rebuildWorkedDxccSetFromVisibleQsos();
+                    targetsSource.changed();
+
+                    if (ui.statusEl) {
+                        ui.statusEl.textContent =
+                            `ADIF načten: DXCC cílů ${byEntity.size}` + (unknownDxcc ? ` | Neznámé DXCC: ${unknownDxcc}` : '');
+                    }
+
+                    const ext = targetsSource.getExtent();
+                    if (ext && ext.every(Number.isFinite)) {
+                        view.fit(ext, { padding: [80, 80, 80, 80], duration: 350, maxZoom: 4 });
+                    }
+
+                    positionLayersPanel();
+                    return;
+                }
+
+                // ---- EDI větev ----
+                const text = await importEdiFile(file);
+                const parsed = parseEdiText(text, isValidTargetLocator6);
+
+                if (ui.ediSetQthCheckbox?.checked && parsed.myLocator) {
+                    if (ui.qthInput) ui.qthInput.value = parsed.myLocator;
+                    setQthFromLocator(parsed.myLocator);
+                }
+
+                if (!parsed.targets.length) {
+                    if (ui.statusEl) ui.statusEl.textContent = t().msgEdiNoLocs;
+                    if (ui.targetsTextarea) ui.targetsTextarea.value = '';
+                    targetsSource.clear(true);
+                    if (ui.locatorListEl) ui.locatorListEl.innerHTML = '';
+                    importedByLocator = new Map();
+                    targetsMode = 'LOC';
+                    hideTooltip();
+                    refreshGrid();
+
+                    workedDxccEntityCodes.clear();
+                    dxccGeomSource.changed();
+
+                    qsoCwSource.clear(true);
+                    qsoSsbSource.clear(true);
+                    qsoOtherSource.clear(true);
+
+                    positionLayersPanel();
+                    return;
+                }
+
+                importedByLocator = new Map(
+                    parsed.targets.map(x => [x.locator, { call: (x.call || '').toUpperCase() || null, qso: x.qso || null }])
+                );
+
+                if (ui.targetsTextarea) ui.targetsTextarea.value = parsed.targets.map(x => x.locator).join('\n');
+
+                targetsMode = 'LOC';
+                plotTargetsFromTextarea();
+                refreshGrid();
+
+                if (ui.statusEl) ui.statusEl.textContent = t().msgEdiLoaded(parsed.targets.length, parsed.myLocator);
+
+                positionLayersPanel();
+            } catch (err) {
+                if (ui.statusEl) ui.statusEl.textContent = `Import failed: ${err && err.message ? err.message : String(err)}`;
+                positionLayersPanel();
+            }
+        });
+    }
+
+    if (ui.ctxAddQthBtn) {
+        ui.ctxAddQthBtn.addEventListener('click', () => {
+            if (!lastContextLonLat) return;
+            const [lon, lat] = lastContextLonLat;
+            const locator6 = setQthFromLonLat(lon, lat);
+
+            hideContextMenu();
+            refreshTargetsDistancesIfAny();
             refreshGrid();
 
-            ui.statusEl.textContent = t().msgEdiLoaded(parsed.targets.length, parsed.myLocator);
-
+            if (ui.statusEl) ui.statusEl.textContent = t().msgQthFromMap(locator6, lon.toFixed(5), lat.toFixed(5));
             positionLayersPanel();
-        } catch (err) {
-            ui.statusEl.textContent = `EDI import failed: ${err && err.message ? err.message : String(err)}`;
-            positionLayersPanel();
-        }
-    });
+        });
+    }
 
-    ui.ctxAddQthBtn.addEventListener('click', () => {
-        if (!lastContextLonLat) return;
-        const [lon, lat] = lastContextLonLat;
-        const locator6 = setQthFromLonLat(lon, lat);
-
-        hideContextMenu();
-        refreshTargetsDistancesIfAny();
-        refreshGrid();
-
-        ui.statusEl.textContent = t().msgQthFromMap(locator6, lon.toFixed(5), lat.toFixed(5));
-        positionLayersPanel();
-    });
-
-    ui.ctxExportPngBtn.addEventListener('click', () => {
-        exportMapAsPng({ map, hideContextMenu });
-    });
+    if (ui.ctxExportPngBtn) {
+        ui.ctxExportPngBtn.addEventListener('click', () => {
+            exportMapAsPng({ map, hideContextMenu });
+        });
+    }
 
     /************************************************************
-     *  Hover detekce nad cílovými body: 2s -> tooltip
+     *  Hover detekce nad cílovými body
      ************************************************************/
     map.on('pointermove', (evt) => {
         if (evt.dragging) {
@@ -1088,7 +1293,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     if (ui.panelBodyEl) ui.panelBodyEl.style.display = isPanelCollapsed() ? 'none' : 'block';
     view.fit(zlinskyExtent3857, { padding: [40, 40, 40, 40] });
 
-    // načti DXCC na pozadí (neblokuje start)
     ensureDxccLoaded();
     ensureDxccGeometryLoaded();
 
@@ -1096,6 +1300,5 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     refreshQsoLinks();
     rebuildWorkedDxccSetFromVisibleQsos();
 
-    // po prvním layoutu dopočítej pozici panelu vrstev
     requestAnimationFrame(() => positionLayersPanel());
 })();
