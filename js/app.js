@@ -47,7 +47,18 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         ediSetQthCheckbox: document.getElementById('ediSetQth'),
         importEdiBtn: document.getElementById('importEdi'),
 
-        langSelect: document.getElementById('lang')
+        langSelect: document.getElementById('lang'),
+
+        // panel vrstev
+        layersPanelEl: document.getElementById('layersPanel'),
+        layerMapCheckbox: document.getElementById('layerMap'),
+
+        layerDxccCheckbox: document.getElementById('layerDxcc'),
+
+        layerQsoCheckbox: document.getElementById('layerQso'),
+        layerQsoCwCheckbox: document.getElementById('layerQsoCw'),
+        layerQsoSsbCheckbox: document.getElementById('layerQsoSsb'),
+        layerQsoOtherCheckbox: document.getElementById('layerQsoOther')
     };
 
     const dict = createI18n();
@@ -61,6 +72,11 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     let dxccIndex = null;
     let dxccIndexPromise = null;
 
+    // DXCC geometrie (vrstva států)
+    const workedDxccEntityCodes = new Set(); // entityCode, kde existuje (VIDITELNÉ) spojení
+    let dxccGeomLoaded = false;
+    let dxccGeomPromise = null;
+
     function ensureDxccLoaded() {
         if (dxccIndex) return Promise.resolve(dxccIndex);
         if (dxccIndexPromise) return dxccIndexPromise;
@@ -71,7 +87,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 return dxccIndex;
             })
             .catch((err) => {
-                // DXCC je „nice to have“, mapu to nesmí shodit
                 dxccIndex = null;
                 dxccIndexPromise = null;
                 console.warn('DXCC load failed:', err);
@@ -85,6 +100,20 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         return ui.controlPanel.classList.contains('collapsed');
     }
 
+    function positionLayersPanel() {
+        if (!ui.layersPanelEl || !ui.controlPanel) return;
+
+        const cpRect = ui.controlPanel.getBoundingClientRect();
+
+        // Umísti pod hlavní panel; s malou mezerou.
+        const gap = 10;
+        const top = Math.round(cpRect.bottom + gap);
+        const left = Math.round(cpRect.left);
+
+        ui.layersPanelEl.style.top = `${top}px`;
+        ui.layersPanelEl.style.left = `${left}px`;
+    }
+
     function t() {
         return dict[currentLang] || dict.cs;
     }
@@ -94,6 +123,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         ui.langSelect.value = currentLang;
         applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed });
         refreshGrid();
+
+        // texty mohou změnit výšku panelu -> přepozicovat vrstvy
+        positionLayersPanel();
     }
 
     // Panel collapse
@@ -105,11 +137,207 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             const collapsed = ui.controlPanel.classList.toggle('collapsed');
             ui.panelBodyEl.style.display = collapsed ? 'none' : 'block';
             applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed });
+
+            positionLayersPanel();
         });
     }
 
     // Map + layers
     const osmLayer = new ol.layer.Tile({ source: new ol.source.OSM() });
+    osmLayer.set('name', 'Mapa');
+
+    const dxccGeomSource = new ol.source.Vector();
+    const dxccLayer = new ol.layer.Vector({
+        source: dxccGeomSource,
+        opacity: 0.5,
+        style: (feature) => {
+            const props = feature.getProperties() || {};
+            const code = Number(props.dxcc_entity_code);
+            const isWorked = Number.isFinite(code) && workedDxccEntityCodes.has(code);
+
+            return new ol.style.Style({
+                fill: new ol.style.Fill({
+                    color: isWorked ? 'rgba(255,0,0,0.50)' : 'rgba(255,0,0,0.00)'
+                }),
+                stroke: new ol.style.Stroke({
+                    color: 'rgba(255,0,0,0.18)',
+                    width: 1
+                })
+            });
+        }
+    });
+    dxccLayer.set('name', 'DXCC');
+    dxccLayer.setZIndex(5);
+
+    async function ensureDxccGeometryLoaded() {
+        if (dxccGeomLoaded) return true;
+        if (dxccGeomPromise) return dxccGeomPromise;
+
+        dxccGeomPromise = (async () => {
+            try {
+                const res = await fetch('./geometry/dxcc.geojson', { cache: 'force-cache' });
+                if (!res.ok) throw new Error(`DXCC geometry load failed (${res.status})`);
+                const geojson = await res.json();
+
+                const format = new ol.format.GeoJSON();
+                const features = format.readFeatures(geojson, {
+                    dataProjection: 'EPSG:4326',
+                    featureProjection: 'EPSG:3857'
+                });
+
+                dxccGeomSource.clear(true);
+                dxccGeomSource.addFeatures(features);
+
+                dxccGeomLoaded = true;
+                return true;
+            } catch (err) {
+                console.warn('DXCC geometry load failed:', err);
+                dxccGeomLoaded = false;
+                dxccGeomPromise = null;
+                return false;
+            }
+        })();
+
+        return dxccGeomPromise;
+    }
+
+    // QSO vrstvy: CW / SSB / OTHER (spojnice)
+    const qsoCwSource = new ol.source.Vector();
+    const qsoCwLayer = new ol.layer.Vector({
+        source: qsoCwSource,
+        style: new ol.style.Style({
+            stroke: new ol.style.Stroke({ color: 'rgba(255, 215, 0, 0.95)', width: 2 }) // zlatá
+        })
+    });
+    qsoCwLayer.set('name', 'QSO CW');
+    qsoCwLayer.setZIndex(8);
+
+    const qsoSsbSource = new ol.source.Vector();
+    const qsoSsbLayer = new ol.layer.Vector({
+        source: qsoSsbSource,
+        style: new ol.style.Style({
+            stroke: new ol.style.Stroke({ color: 'rgba(255, 0, 0, 0.90)', width: 2 }) // červená
+        })
+    });
+    qsoSsbLayer.set('name', 'QSO SSB');
+    qsoSsbLayer.setZIndex(8);
+
+    const qsoOtherSource = new ol.source.Vector();
+    const qsoOtherLayer = new ol.layer.Vector({
+        source: qsoOtherSource,
+        style: new ol.style.Style({
+            stroke: new ol.style.Stroke({ color: 'rgba(30, 144, 255, 0.90)', width: 2 }) // modrá (Other)
+        })
+    });
+    qsoOtherLayer.set('name', 'QSO Other');
+    qsoOtherLayer.setZIndex(8);
+
+    const qsoGroupLayer = new ol.layer.Group({
+        layers: [qsoCwLayer, qsoSsbLayer, qsoOtherLayer]
+    });
+    qsoGroupLayer.set('name', 'QSO');
+    qsoGroupLayer.setZIndex(8);
+
+    function detectQsoModeFromModeField(qso) {
+        // Určení módu podle atributu Mode (qso.mode)
+        const m = String(qso?.mode ?? '').trim().toUpperCase();
+        if (!m) return 'OTHER';
+
+        if (m === 'CW' || m.includes('CW')) return 'CW';
+
+        // SSB (často SSB / USB / LSB)
+        if (m === 'SSB' || m === 'USB' || m === 'LSB' || m.includes('SSB')) return 'SSB';
+
+        return 'OTHER';
+    }
+
+    function isQsoModeVisible(mode) {
+        if (mode === 'CW') return qsoCwLayer.getVisible();
+        if (mode === 'SSB') return qsoSsbLayer.getVisible();
+        if (mode === 'OTHER') return qsoOtherLayer.getVisible();
+        return false;
+    }
+
+    function refreshQsoLinks() {
+        qsoCwSource.clear(true);
+        qsoSsbSource.clear(true);
+        qsoOtherSource.clear(true);
+
+        const qthLL = getQthLonLatOrNull();
+        if (!qthLL) return;
+
+        const qth3857 = ol.proj.fromLonLat(qthLL);
+
+        for (const f of targetsSource.getFeatures()) {
+            const coords = f.getGeometry()?.getCoordinates();
+            if (!coords) continue;
+
+            const qso = f.get('qso');
+            if (!qso) continue; // jen skutečná QSO (z EDI)
+
+            const mode = f.get('qsoMode') || detectQsoModeFromModeField(qso);
+
+            const line = new ol.Feature({
+                geometry: new ol.geom.LineString([qth3857, coords]),
+                locator: f.get('locator') || null,
+                call: f.get('call') || null,
+                mode
+            });
+
+            if (mode === 'CW') qsoCwSource.addFeature(line);
+            else if (mode === 'SSB') qsoSsbSource.addFeature(line);
+            else qsoOtherSource.addFeature(line);
+        }
+    }
+
+    function rebuildWorkedDxccSetFromVisibleQsos() {
+        workedDxccEntityCodes.clear();
+
+        for (const f of targetsSource.getFeatures()) {
+            const qso = f.get('qso');
+            if (!qso) continue; // jen spojení (EDI)
+
+            const mode = f.get('qsoMode') || detectQsoModeFromModeField(qso);
+
+            // když uživatel vypne CW/SSB/OTHER, nesmí se to počítat do DXCC „worked“
+            if (!isQsoModeVisible(mode)) continue;
+
+            const code = Number(f.get('dxccEntityCode'));
+            if (Number.isFinite(code)) workedDxccEntityCodes.add(code);
+        }
+
+        dxccGeomSource.changed();
+    }
+
+    function setQsoCheckboxStateFromLayers() {
+        if (!ui.layerQsoCheckbox || !ui.layerQsoCwCheckbox || !ui.layerQsoSsbCheckbox || !ui.layerQsoOtherCheckbox) return;
+
+        const cw = qsoCwLayer.getVisible();
+        const ssb = qsoSsbLayer.getVisible();
+        const other = qsoOtherLayer.getVisible();
+
+        ui.layerQsoCwCheckbox.checked = cw;
+        ui.layerQsoSsbCheckbox.checked = ssb;
+        ui.layerQsoOtherCheckbox.checked = other;
+
+        const anyOn = (cw || ssb || other);
+        const allOn = (cw && ssb && other);
+
+        // parent: checked pokud je něco vidět; indeterminate pokud není jednotný stav
+        ui.layerQsoCheckbox.indeterminate = (anyOn && !allOn);
+        ui.layerQsoCheckbox.checked = anyOn;
+    }
+
+    function setQsoChildrenVisible(vis) {
+        qsoCwLayer.setVisible(vis);
+        qsoSsbLayer.setVisible(vis);
+        qsoOtherLayer.setVisible(vis);
+        setQsoCheckboxStateFromLayers();
+
+        // změna viditelnosti QSO -> musí schovat i puntíky + přepočítat DXCC
+        targetsSource.changed();
+        rebuildWorkedDxccSetFromVisibleQsos();
+    }
 
     const gridSource = new ol.source.Vector();
     const gridLayer = new ol.layer.Vector({
@@ -137,28 +365,28 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     const targetsSource = new ol.source.Vector();
     const targetsLayer = new ol.layer.Vector({
         source: targetsSource,
-        style: feature => new ol.style.Style({
-            image: new ol.style.Circle({
-                radius: 5,
-                fill: new ol.style.Fill({ color: '#00a36c' }),
-                stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 })
-            }),
-            text: new ol.style.Text({
-                text: feature.get('label') || '',
-                offsetY: -14,
-                font: '12px system-ui, Arial',
-                fill: new ol.style.Fill({ color: '#0b3b2a' }),
-                stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.9)', width: 3 })
-            })
-        })
-    });
+        style: (feature) => {
+            const qso = feature.get('qso');
+            const qsoMode = feature.get('qsoMode');
 
-    const linksSource = new ol.source.Vector();
-    const linksLayer = new ol.layer.Vector({
-        source: linksSource,
-        style: new ol.style.Style({
-            stroke: new ol.style.Stroke({ color: 'rgba(255,0,0,0.9)', width: 2 })
-        })
+            // „puntík spojení“ musí zmizet, když se vypne CW/SSB/OTHER
+            if (qso && qsoMode && !isQsoModeVisible(qsoMode)) return null;
+
+            return new ol.style.Style({
+                image: new ol.style.Circle({
+                    radius: 5,
+                    fill: new ol.style.Fill({ color: '#00a36c' }),
+                    stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 })
+                }),
+                text: new ol.style.Text({
+                    text: feature.get('label') || '',
+                    offsetY: -14,
+                    font: '12px system-ui, Arial',
+                    fill: new ol.style.Fill({ color: '#0b3b2a' }),
+                    stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.9)', width: 3 })
+                })
+            });
+        }
     });
 
     const qthSource = new ol.source.Vector();
@@ -187,7 +415,15 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
     const map = new ol.Map({
         target: 'map',
-        layers: [osmLayer, gridLayer, highlightLayer, targetsLayer, linksLayer, qthLayer],
+        layers: [
+            osmLayer,
+            dxccLayer,
+            qsoGroupLayer,
+            gridLayer,
+            highlightLayer,
+            targetsLayer,
+            qthLayer
+        ],
         view
     });
 
@@ -238,7 +474,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         const dxccEntityCode = feature.get('dxccEntityCode');
         const dxccName = feature.get('dxccName');
 
-        // Pokud nejsou detaily, zobraz jen lokátor (+ případně DXCC, pokud je)
+        // Pokud nejsou detaily, zobraz jen lokátor (+ případně DXCC)
         if (!qso) {
             const lines = [];
             lines.push(`<div class="title">${escapeHtml(locator || '')}</div>`);
@@ -257,26 +493,22 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         const lines = [];
         lines.push(`<div class="title">${escapeHtml(title)}</div>`);
 
-        // Rozšíření hintu: DXCC entita + země
+        // DXCC (rozšíření hintu)
         if (dxccEntityCode && dxccName) {
             lines.push(
                 `<div class="line"><span class="key">DXCC</span><span class="val">${escapeHtml(String(dxccEntityCode))} — ${escapeHtml(dxccName)}</span></div>`
             );
         }
 
-        // Date + Time
         const dt = [fmt(qso.date), fmt(qso.time)].filter(Boolean).join(' ');
         if (dt) {
             lines.push(`<div class="line"><span class="key">Date/Time</span><span class="val">${escapeHtml(dt)}</span></div>`);
         }
 
-        // Mode
         if (fmt(qso.mode)) {
             lines.push(`<div class="line"><span class="key">Mode</span><span class="val">${escapeHtml(qso.mode)}</span></div>`);
         }
 
-        // Sent/Received ve formátu: "59 005 JO88WX" (SSB) nebo "599 005 JO88WX" (CW)
-        // report je už správně (59 vs 599) z EDI
         const sentStr = formatExchange(qso.sentReport, qso.sentContestCode, qso.myLocator);
         if (sentStr) {
             lines.push(`<div class="line"><span class="key">Sent</span><span class="val">${escapeHtml(sentStr)}</span></div>`);
@@ -291,7 +523,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             lines.push(`<div class="line"><span class="key">Rcvd</span><span class="val">${escapeHtml(qso.rcvExchangeRaw)}</span></div>`);
         }
 
-        // QRB
         if (typeof km === 'number' && Number.isFinite(km)) {
             lines.push(`<div class="line"><span class="key">QRB</span><span class="val">${escapeHtml(km.toFixed(1))} km</span></div>`);
         }
@@ -361,21 +592,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             label: `QTH ${String(locator).trim()}`
         }));
         return true;
-    }
-
-    function refreshLinks() {
-        linksSource.clear(true);
-        const qthLL = getQthLonLatOrNull();
-        if (!qthLL) return;
-
-        const qth3857 = ol.proj.fromLonLat(qthLL);
-        for (const f of targetsSource.getFeatures()) {
-            const coords = f.getGeometry()?.getCoordinates();
-            if (!coords) continue;
-            linksSource.addFeature(new ol.Feature({
-                geometry: new ol.geom.LineString([qth3857, coords])
-            }));
-        }
     }
 
     function pickLevel() {
@@ -477,6 +693,8 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             const call = imported?.call || null;
             const qso = imported?.qso || null;
 
+            const qsoMode = qso ? detectQsoModeFromModeField(qso) : null;
+
             // DXCC lookup podle prefixů (prefix == začátek značky)
             const dxcc = (call && dxccIndex)
                 ? findDxccByCall(call, dxccIndex, { includeDeleted: false })
@@ -490,6 +708,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 locator: loc,
                 call,
                 qso,
+                qsoMode,
                 km,
                 dxccEntityCode: dxcc?.entityCode ?? null,
                 dxccName: dxcc?.name ?? null
@@ -499,6 +718,12 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         }
 
         renderLocatorList(listItems);
+
+        refreshQsoLinks();
+        rebuildWorkedDxccSetFromVisibleQsos();
+
+        // překreslit puntíky (styl je závislý na visible CW/SSB/OTHER)
+        targetsSource.changed();
 
         if (invalid.length) {
             ui.statusEl.textContent = t().msgInvalidLines(
@@ -515,12 +740,13 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             }
         }
 
-        refreshLinks();
+        positionLayersPanel();
     }
 
     function refreshTargetsDistancesIfAny() {
         if (!targetsSource.getFeatures().length) {
-            refreshLinks();
+            refreshQsoLinks();
+            rebuildWorkedDxccSetFromVisibleQsos();
             return;
         }
         plotTargetsFromTextarea();
@@ -601,6 +827,62 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     ui.modeSelect.addEventListener('change', refreshGrid);
     ui.gridToggle.addEventListener('change', refreshGrid);
 
+    // Panel vrstev (tree)
+    if (ui.layerMapCheckbox) {
+        ui.layerMapCheckbox.checked = true;
+        ui.layerMapCheckbox.disabled = true; // Mapa nepůjde vypnout
+    }
+
+    if (ui.layerDxccCheckbox) {
+        ui.layerDxccCheckbox.checked = dxccLayer.getVisible();
+        ui.layerDxccCheckbox.addEventListener('change', async () => {
+            const wantVisible = Boolean(ui.layerDxccCheckbox.checked);
+            if (wantVisible) await ensureDxccGeometryLoaded();
+            dxccLayer.setVisible(wantVisible);
+        });
+    }
+
+    if (ui.layerQsoCheckbox && ui.layerQsoCwCheckbox && ui.layerQsoSsbCheckbox && ui.layerQsoOtherCheckbox) {
+        // init
+        setQsoCheckboxStateFromLayers();
+
+        ui.layerQsoCheckbox.addEventListener('change', () => {
+            const on = Boolean(ui.layerQsoCheckbox.checked);
+            setQsoChildrenVisible(on);
+        });
+
+        ui.layerQsoCwCheckbox.addEventListener('change', () => {
+            qsoCwLayer.setVisible(Boolean(ui.layerQsoCwCheckbox.checked));
+            setQsoCheckboxStateFromLayers();
+
+            // musí se schovat puntíky i přepočítat DXCC podle viditelných spojení
+            targetsSource.changed();
+            rebuildWorkedDxccSetFromVisibleQsos();
+        });
+
+        ui.layerQsoSsbCheckbox.addEventListener('change', () => {
+            qsoSsbLayer.setVisible(Boolean(ui.layerQsoSsbCheckbox.checked));
+            setQsoCheckboxStateFromLayers();
+
+            // musí se schovat puntíky i přepočítat DXCC podle viditelných spojení
+            targetsSource.changed();
+            rebuildWorkedDxccSetFromVisibleQsos();
+        });
+
+        ui.layerQsoOtherCheckbox.addEventListener('change', () => {
+            qsoOtherLayer.setVisible(Boolean(ui.layerQsoOtherCheckbox.checked));
+            setQsoCheckboxStateFromLayers();
+
+            // musí se schovat puntíky i přepočítat DXCC podle viditelných spojení
+            targetsSource.changed();
+            rebuildWorkedDxccSetFromVisibleQsos();
+        });
+    }
+
+    window.addEventListener('resize', () => {
+        positionLayersPanel();
+    });
+
     let gridTimer = null;
     map.on('moveend', () => {
         clearTimeout(gridTimer);
@@ -630,8 +912,8 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             return;
         }
         refreshTargetsDistancesIfAny();
-        refreshLinks();
         refreshGrid();
+        positionLayersPanel();
     });
 
     ui.qthInput.addEventListener('keydown', (e) => {
@@ -641,23 +923,24 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             return;
         }
         refreshTargetsDistancesIfAny();
-        refreshLinks();
         refreshGrid();
+        positionLayersPanel();
     });
 
     ui.clearQthBtn.addEventListener('click', () => {
         ui.qthInput.value = '';
         qthSource.clear(true);
         refreshTargetsDistancesIfAny();
-        refreshLinks();
         refreshGrid();
+        positionLayersPanel();
     });
 
     ui.plotTargetsBtn.addEventListener('click', async () => {
         await ensureDxccLoaded();
+        await ensureDxccGeometryLoaded();
         plotTargetsFromTextarea();
-        refreshLinks();
         refreshGrid();
+        positionLayersPanel();
     });
 
     ui.clearTargetsBtn.addEventListener('click', () => {
@@ -666,8 +949,16 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         ui.locatorListEl.innerHTML = '';
         importedByLocator = new Map();
         hideTooltip();
-        refreshLinks();
         refreshGrid();
+
+        workedDxccEntityCodes.clear();
+        dxccGeomSource.changed();
+
+        qsoCwSource.clear(true);
+        qsoSsbSource.clear(true);
+        qsoOtherSource.clear(true);
+
+        positionLayersPanel();
     });
 
     ui.importEdiBtn.addEventListener('click', async () => {
@@ -693,12 +984,19 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 ui.locatorListEl.innerHTML = '';
                 importedByLocator = new Map();
                 hideTooltip();
-                refreshLinks();
                 refreshGrid();
+
+                workedDxccEntityCodes.clear();
+                dxccGeomSource.changed();
+
+                qsoCwSource.clear(true);
+                qsoSsbSource.clear(true);
+                qsoOtherSource.clear(true);
+
+                positionLayersPanel();
                 return;
             }
 
-            // locator -> {call,qso}
             importedByLocator = new Map(
                 parsed.targets.map(x => [x.locator, { call: (x.call || '').toUpperCase() || null, qso: x.qso || null }])
             );
@@ -706,14 +1004,17 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             ui.targetsTextarea.value = parsed.targets.map(x => x.locator).join('\n');
 
             await ensureDxccLoaded();
+            await ensureDxccGeometryLoaded();
 
             plotTargetsFromTextarea();
-            refreshLinks();
             refreshGrid();
 
             ui.statusEl.textContent = t().msgEdiLoaded(parsed.targets.length, parsed.myLocator);
+
+            positionLayersPanel();
         } catch (err) {
             ui.statusEl.textContent = `EDI import failed: ${err && err.message ? err.message : String(err)}`;
+            positionLayersPanel();
         }
     });
 
@@ -724,10 +1025,10 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
         hideContextMenu();
         refreshTargetsDistancesIfAny();
-        refreshLinks();
         refreshGrid();
 
         ui.statusEl.textContent = t().msgQthFromMap(locator6, lon.toFixed(5), lat.toFixed(5));
+        positionLayersPanel();
     });
 
     ui.ctxExportPngBtn.addEventListener('click', () => {
@@ -789,7 +1090,12 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
     // načti DXCC na pozadí (neblokuje start)
     ensureDxccLoaded();
+    ensureDxccGeometryLoaded();
 
     refreshGrid();
-    refreshLinks();
+    refreshQsoLinks();
+    rebuildWorkedDxccSetFromVisibleQsos();
+
+    // po prvním layoutu dopočítej pozici panelu vrstev
+    requestAnimationFrame(() => positionLayersPanel());
 })();

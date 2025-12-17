@@ -36,7 +36,8 @@ export function createI18n() {
             msgInvalidLines: s => `Neplatné řádky (ignorováno): ${s}`,
             msgShownLocs: (n, hasQth) => `Zobrazeno lokátorů: ${n}${hasQth ? '' : ' (vzdálenost až po nastavení QTH)'}`,
             msgQthFromMap: (loc, lon, lat) => `QTH nastaveno z mapy: ${loc} (lon ${lon}, lat ${lat})`,
-            msgNeedQthForDist: '— (nastav Moje QTH pro vzdálenost)'
+            msgNeedQthForDist: '— (nastav Moje QTH pro vzdálenost)',
+            layerQsoOther: 'Ostatní'
         },
         en: {
             appTitle: 'Hamradio QRB map viewer',
@@ -73,7 +74,8 @@ export function createI18n() {
             msgInvalidLines: s => `Invalid lines (ignored): ${s}`,
             msgShownLocs: (n, hasQth) => `Shown locators: ${n}${hasQth ? '' : ' (distance after setting QTH)'}`,
             msgQthFromMap: (loc, lon, lat) => `QTH set from map: ${loc} (lon ${lon}, lat ${lat})`,
-            msgNeedQthForDist: '— (set My QTH to compute distance)'
+            msgNeedQthForDist: '— (set My QTH to compute distance)',
+            layerQsoOther: 'Other'
         }
     };
 
@@ -101,6 +103,7 @@ export function applyTranslations({ lang, dict, ui, isPanelCollapsed }) {
     setText('lblSearch', t.lblSearch);
     setText('lblQth', t.lblQth);
     setText('lblTargetsHelp', t.lblTargetsHelp);
+    setText('lblLayerQsoOther', t.layerQsoOther);
 
     ui.importEdiBtn.textContent = t.importEdi;
     ui.goLocatorBtn.textContent = t.goLocator;

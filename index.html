@@ -12,6 +12,78 @@
 
 <div id="map"></div>
 
+<!-- Okno: Vrstvy -->
+<div class="layers" id="layersPanel" role="region" aria-label="Vrstvy">
+    <div class="layers-header">
+        <div class="title">Vrstvy</div>
+    </div>
+    <div class="layers-body">
+        <ul class="layers-tree" role="tree" aria-label="Seznam vrstev">
+            <li role="treeitem" aria-expanded="true">
+                <div class="node">
+                    <span class="twisty" aria-hidden="true"></span>
+                    <label class="layer-item">
+                        <input id="layerMap" type="checkbox" checked disabled />
+                        <span>Mapa</span>
+                    </label>
+                </div>
+
+                <ul role="group">
+                    <li role="treeitem">
+                        <div class="node leaf">
+                            <span class="twisty" aria-hidden="true"></span>
+                            <label class="layer-item">
+                                <input id="layerDxcc" type="checkbox" checked />
+                                <span>DXCC</span>
+                            </label>
+                        </div>
+                    </li>
+
+                    <li role="treeitem" aria-expanded="true">
+                        <div class="node">
+                            <span class="twisty" aria-hidden="true"></span>
+                            <label class="layer-item">
+                                <input id="layerQso" type="checkbox" checked />
+                                <span>QSO</span>
+                            </label>
+                        </div>
+
+                        <ul role="group">
+                            <li role="treeitem">
+                                <div class="node leaf">
+                                    <span class="twisty" aria-hidden="true"></span>
+                                    <label class="layer-item">
+                                        <input id="layerQsoCw" type="checkbox" checked />
+                                        <span id="lblLayerQsoCw">CW</span>
+                                    </label>
+                                </div>
+                            </li>
+                            <li role="treeitem">
+                                <div class="node leaf">
+                                    <span class="twisty" aria-hidden="true"></span>
+                                    <label class="layer-item">
+                                        <input id="layerQsoSsb" type="checkbox" checked />
+                                        <span id="lblLayerQsoSsb">SSB</span>
+                                    </label>
+                                </div>
+                            </li>
+                            <li role="treeitem">
+                                <div class="node leaf">
+                                    <span class="twisty" aria-hidden="true"></span>
+                                    <label class="layer-item">
+                                        <input id="layerQsoOther" type="checkbox" checked />
+                                        <span id="lblLayerQsoOther">Ostatní</span>
+                                    </label>
+                                </div>
+                            </li>
+                        </ul>
+                    </li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+</div>
+
 <!-- Kontextové menu -->
 <div id="contextMenu" role="menu" aria-label="Menu mapy">
     <button id="ctxAddQth" type="button">Přidej Moje QTH</button>
@@ -52,9 +124,6 @@
                 <input type="checkbox" id="gridToggle" checked />
             </label>
         </div>
-
-
-
 
         <div class="row">
             <label for="ediFile" id="lblEdi">Import EDI:</label>
