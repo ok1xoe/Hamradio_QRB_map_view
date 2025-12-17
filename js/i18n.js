@@ -39,9 +39,9 @@ export function createI18n() {
             msgEdiLoaded: (n, my) => `EDI načteno: ${n} lokátorů${my ? ` | QTH: ${my}` : ''}`,
             msgBadLocator: 'Neplatný lokátor. Zadej 2/4/6 znaků (např. JN / JN89 / JN89ab).',
             msgBadQth: 'Neplatné QTH. Zadej lokátor ve formátu 2/4/6 znaků (např. JN89ab).',
-            msgGridOff: z => `Zoom: ${z} | Mřížka: VYPNUTO`,
+            msgGridOff: (z) => `Zoom: ${z} | Mřížka: VYPNUTO`,
             msgGridOn: (z, lvl, n) => `Zoom: ${z} | ${lvl} | Buněk: ${n}`,
-            msgInvalidLines: s => `Neplatné řádky (ignorováno): ${s}`,
+            msgInvalidLines: (s) => `Neplatné řádky (ignorováno): ${s}`,
             msgShownLocs: (n, hasQth) => `Zobrazeno lokátorů: ${n}${hasQth ? '' : ' (vzdálenost až po nastavení QTH)'}`,
             msgQthFromMap: (loc, lon, lat) => `QTH nastaveno z mapy: ${loc} (lon ${lon}, lat ${lat})`,
             msgNeedQthForDist: '— (nastav Moje QTH pro vzdálenost)',
@@ -104,9 +104,9 @@ export function createI18n() {
             msgEdiLoaded: (n, my) => `EDI loaded: ${n} locators${my ? ` | QTH: ${my}` : ''}`,
             msgBadLocator: 'Invalid locator. Use 2/4/6 chars (e.g. JN / JN89 / JN89ab).',
             msgBadQth: 'Invalid QTH. Use locator format 2/4/6 (e.g. JN89ab).',
-            msgGridOff: z => `Zoom: ${z} | Grid: OFF`,
+            msgGridOff: (z) => `Zoom: ${z} | Grid: OFF`,
             msgGridOn: (z, lvl, n) => `Zoom: ${z} | ${lvl} | Cells: ${n}`,
-            msgInvalidLines: s => `Invalid lines (ignored): ${s}`,
+            msgInvalidLines: (s) => `Invalid lines (ignored): ${s}`,
             msgShownLocs: (n, hasQth) => `Shown locators: ${n}${hasQth ? '' : ' (distance after setting QTH)'}`,
             msgQthFromMap: (loc, lon, lat) => `QTH set from map: ${loc} (lon ${lon}, lat ${lat})`,
             msgNeedQthForDist: '— (set My QTH to compute distance)',
@@ -170,13 +170,12 @@ export function applyTranslations({ lang, dict, ui, isPanelCollapsed }) {
     setText('lblLayerLinks', t.layerLinks);
     setText('lblLayerMode', t.layerMode);
 
-    // Spojnice (top-level)
+    // Spojnice
     setText('lblLayerLinksCw', t.layerCw);
     setText('lblLayerLinksSsb', t.layerSsb);
     setText('lblLayerLinksOther', t.layerOther);
     setText('lblLayerLinksDigi', t.layerDigi);
 
-    // Spojnice > DIGI (submodes)
     setText('lblLayerLinksDigiFt8', t.digiFt8);
     setText('lblLayerLinksDigiFt4', t.digiFt4);
     setText('lblLayerLinksDigiJt65', t.digiJt65);
@@ -186,13 +185,12 @@ export function applyTranslations({ lang, dict, ui, isPanelCollapsed }) {
     setText('lblLayerLinksDigiPsk125', t.digiPsk125);
     setText('lblLayerLinksDigiSstv', t.digiSstv);
 
-    // Mode (top-level)
+    // Mode
     setText('lblLayerQsoCw', t.layerCw);
     setText('lblLayerQsoSsb', t.layerSsb);
     setText('lblLayerQsoOther', t.layerOther);
     setText('lblLayerQsoDigi', t.layerDigi);
 
-    // Mode > DIGI (submodes)
     setText('lblLayerQsoDigiFt8', t.digiFt8);
     setText('lblLayerQsoDigiFt4', t.digiFt4);
     setText('lblLayerQsoDigiJt65', t.digiJt65);
@@ -202,7 +200,21 @@ export function applyTranslations({ lang, dict, ui, isPanelCollapsed }) {
     setText('lblLayerQsoDigiPsk125', t.digiPsk125);
     setText('lblLayerQsoDigiSstv', t.digiSstv);
 
-    // Buttons
+    // DXCC
+    setText('lblLayerDxccCw', t.layerCw);
+    setText('lblLayerDxccSsb', t.layerSsb);
+    setText('lblLayerDxccOther', t.layerOther);
+    setText('lblLayerDxccDigi', t.layerDigi);
+
+    setText('lblLayerDxccDigiFt8', t.digiFt8);
+    setText('lblLayerDxccDigiFt4', t.digiFt4);
+    setText('lblLayerDxccDigiJt65', t.digiJt65);
+    setText('lblLayerDxccDigiRtty', t.digiRtty);
+    setText('lblLayerDxccDigiPsk31', t.digiPsk31);
+    setText('lblLayerDxccDigiPsk63', t.digiPsk63);
+    setText('lblLayerDxccDigiPsk125', t.digiPsk125);
+    setText('lblLayerDxccDigiSstv', t.digiSstv);
+
     setElText(ui?.importEdiBtn, t.importEdi);
     setElText(ui?.goLocatorBtn, t.goLocator);
     setElText(ui?.clearLocatorBtn, t.clearLocator);
@@ -211,16 +223,13 @@ export function applyTranslations({ lang, dict, ui, isPanelCollapsed }) {
     setElText(ui?.plotTargetsBtn, t.plotTargets);
     setElText(ui?.clearTargetsBtn, t.clearTargets);
 
-    // Placeholders
     setElPlaceholder(ui?.locatorInput, t.placeholderLocator);
     setElPlaceholder(ui?.qthInput, t.placeholderQth);
     setElPlaceholder(ui?.targetsTextarea, t.placeholderTargets);
 
-    // Context menu
     setElText(ui?.ctxAddQthBtn, t.ctxAddQth);
     setElText(ui?.ctxExportPngBtn, t.ctxExportPng);
 
-    // Panel toggle
     setElText(
         ui?.togglePanelBtn,
         (typeof isPanelCollapsed === 'function' && isPanelCollapsed())

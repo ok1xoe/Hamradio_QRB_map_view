@@ -12,7 +12,7 @@
 
 <div id="map"></div>
 
-<!-- Okno: Vrstvy -->
+<!-- Okno: Vrstvy (vlevo) -->
 <div class="layers" id="layersPanel" role="region" aria-label="Vrstvy">
     <div class="layers-header">
         <div class="title" id="lblLayersTitle">Vrstvy</div>
@@ -22,6 +22,7 @@
             <li role="treeitem" aria-expanded="true">
                 <div class="node">
                     <span class="twisty" aria-hidden="true"></span>
+
                     <label class="layer-item">
                         <input id="layerMap" type="checkbox" checked disabled />
                         <span id="lblLayerMap">Mapa</span>
@@ -29,14 +30,182 @@
                 </div>
 
                 <ul role="group">
-                    <li role="treeitem">
-                        <div class="node leaf">
+
+                    <!-- DXCC -->
+                    <li role="treeitem" aria-expanded="true">
+                        <div class="node">
                             <span class="twisty" aria-hidden="true"></span>
+
                             <label class="layer-item">
                                 <input id="layerDxcc" type="checkbox" checked />
                                 <span id="lblLayerDxcc">DXCC</span>
                             </label>
                         </div>
+
+                        <ul role="group">
+                            <li role="treeitem">
+                                <div class="node leaf">
+                                    <span class="twisty" aria-hidden="true"></span>
+
+                                    <label class="layer-item">
+                                        <input id="layerDxccCw" type="checkbox" checked />
+                                        <span id="lblLayerDxccCw">CW</span>
+                                    </label>
+
+                                    <button class="color-btn" type="button" data-color-key="dxcc.cw" aria-label="Barva: DXCC CW">
+                                        <span class="swatch" data-swatch-key="dxcc.cw"></span>
+                                    </button>
+                                </div>
+                            </li>
+
+                            <li role="treeitem">
+                                <div class="node leaf">
+                                    <span class="twisty" aria-hidden="true"></span>
+
+                                    <label class="layer-item">
+                                        <input id="layerDxccSsb" type="checkbox" checked />
+                                        <span id="lblLayerDxccSsb">SSB</span>
+                                    </label>
+
+                                    <button class="color-btn" type="button" data-color-key="dxcc.ssb" aria-label="Barva: DXCC SSB">
+                                        <span class="swatch" data-swatch-key="dxcc.ssb"></span>
+                                    </button>
+                                </div>
+                            </li>
+
+                            <li role="treeitem">
+                                <div class="node leaf">
+                                    <span class="twisty" aria-hidden="true"></span>
+
+                                    <label class="layer-item">
+                                        <input id="layerDxccOther" type="checkbox" checked />
+                                        <span id="lblLayerDxccOther">Ostatní</span>
+                                    </label>
+
+                                    <button class="color-btn" type="button" data-color-key="dxcc.other" aria-label="Barva: DXCC Ostatní">
+                                        <span class="swatch" data-swatch-key="dxcc.other"></span>
+                                    </button>
+                                </div>
+                            </li>
+
+                            <!-- DIGI (DXCC) -->
+                            <li role="treeitem" aria-expanded="true">
+                                <div class="node">
+                                    <span class="twisty" aria-hidden="true"></span>
+
+                                    <label class="layer-item">
+                                        <input id="layerDxccDigi" type="checkbox" checked />
+                                        <span id="lblLayerDxccDigi">DIGI</span>
+                                    </label>
+                                </div>
+
+                                <ul role="group">
+                                    <li role="treeitem">
+                                        <div class="node leaf">
+                                            <span class="twisty" aria-hidden="true"></span>
+                                            <label class="layer-item">
+                                                <input id="layerDxccDigiFt8" type="checkbox" checked />
+                                                <span id="lblLayerDxccDigiFt8">FT8</span>
+                                            </label>
+                                            <button class="color-btn" type="button" data-color-key="dxcc.digi.ft8" aria-label="Barva: DXCC FT8">
+                                                <span class="swatch" data-swatch-key="dxcc.digi.ft8"></span>
+                                            </button>
+                                        </div>
+                                    </li>
+
+                                    <li role="treeitem">
+                                        <div class="node leaf">
+                                            <span class="twisty" aria-hidden="true"></span>
+                                            <label class="layer-item">
+                                                <input id="layerDxccDigiFt4" type="checkbox" checked />
+                                                <span id="lblLayerDxccDigiFt4">FT4</span>
+                                            </label>
+                                            <button class="color-btn" type="button" data-color-key="dxcc.digi.ft4" aria-label="Barva: DXCC FT4">
+                                                <span class="swatch" data-swatch-key="dxcc.digi.ft4"></span>
+                                            </button>
+                                        </div>
+                                    </li>
+
+                                    <li role="treeitem">
+                                        <div class="node leaf">
+                                            <span class="twisty" aria-hidden="true"></span>
+                                            <label class="layer-item">
+                                                <input id="layerDxccDigiJt65" type="checkbox" checked />
+                                                <span id="lblLayerDxccDigiJt65">JT65</span>
+                                            </label>
+                                            <button class="color-btn" type="button" data-color-key="dxcc.digi.jt65" aria-label="Barva: DXCC JT65">
+                                                <span class="swatch" data-swatch-key="dxcc.digi.jt65"></span>
+                                            </button>
+                                        </div>
+                                    </li>
+
+                                    <li role="treeitem">
+                                        <div class="node leaf">
+                                            <span class="twisty" aria-hidden="true"></span>
+                                            <label class="layer-item">
+                                                <input id="layerDxccDigiRtty" type="checkbox" checked />
+                                                <span id="lblLayerDxccDigiRtty">RTTY</span>
+                                            </label>
+                                            <button class="color-btn" type="button" data-color-key="dxcc.digi.rtty" aria-label="Barva: DXCC RTTY">
+                                                <span class="swatch" data-swatch-key="dxcc.digi.rtty"></span>
+                                            </button>
+                                        </div>
+                                    </li>
+
+                                    <li role="treeitem">
+                                        <div class="node leaf">
+                                            <span class="twisty" aria-hidden="true"></span>
+                                            <label class="layer-item">
+                                                <input id="layerDxccDigiPsk31" type="checkbox" checked />
+                                                <span id="lblLayerDxccDigiPsk31">PSK31</span>
+                                            </label>
+                                            <button class="color-btn" type="button" data-color-key="dxcc.digi.psk31" aria-label="Barva: DXCC PSK31">
+                                                <span class="swatch" data-swatch-key="dxcc.digi.psk31"></span>
+                                            </button>
+                                        </div>
+                                    </li>
+
+                                    <li role="treeitem">
+                                        <div class="node leaf">
+                                            <span class="twisty" aria-hidden="true"></span>
+                                            <label class="layer-item">
+                                                <input id="layerDxccDigiPsk63" type="checkbox" checked />
+                                                <span id="lblLayerDxccDigiPsk63">PSK63</span>
+                                            </label>
+                                            <button class="color-btn" type="button" data-color-key="dxcc.digi.psk63" aria-label="Barva: DXCC PSK63">
+                                                <span class="swatch" data-swatch-key="dxcc.digi.psk63"></span>
+                                            </button>
+                                        </div>
+                                    </li>
+
+                                    <li role="treeitem">
+                                        <div class="node leaf">
+                                            <span class="twisty" aria-hidden="true"></span>
+                                            <label class="layer-item">
+                                                <input id="layerDxccDigiPsk125" type="checkbox" checked />
+                                                <span id="lblLayerDxccDigiPsk125">PSK125</span>
+                                            </label>
+                                            <button class="color-btn" type="button" data-color-key="dxcc.digi.psk125" aria-label="Barva: DXCC PSK125">
+                                                <span class="swatch" data-swatch-key="dxcc.digi.psk125"></span>
+                                            </button>
+                                        </div>
+                                    </li>
+
+                                    <li role="treeitem">
+                                        <div class="node leaf">
+                                            <span class="twisty" aria-hidden="true"></span>
+                                            <label class="layer-item">
+                                                <input id="layerDxccDigiSstv" type="checkbox" checked />
+                                                <span id="lblLayerDxccDigiSstv">SSTV</span>
+                                            </label>
+                                            <button class="color-btn" type="button" data-color-key="dxcc.digi.sstv" aria-label="Barva: DXCC SSTV">
+                                                <span class="swatch" data-swatch-key="dxcc.digi.sstv"></span>
+                                            </button>
+                                        </div>
+                                    </li>
+                                </ul>
+                            </li>
+                        </ul>
                     </li>
 
                     <!-- Spojnice -->
@@ -50,37 +219,30 @@
                         </div>
 
                         <ul role="group">
-                            <li role="treeitem">
-                                <div class="node leaf">
-                                    <span class="twisty" aria-hidden="true"></span>
-                                    <label class="layer-item">
-                                        <input id="layerLinksCw" type="checkbox" checked />
-                                        <span id="lblLayerLinksCw">CW</span>
-                                    </label>
-                                </div>
-                            </li>
+                            <li role="treeitem"><div class="node leaf">
+                                <span class="twisty" aria-hidden="true"></span>
+                                <label class="layer-item">
+                                    <input id="layerLinksCw" type="checkbox" checked />
+                                    <span id="lblLayerLinksCw">CW</span>
+                                </label>
+                            </div></li>
 
-                            <li role="treeitem">
-                                <div class="node leaf">
-                                    <span class="twisty" aria-hidden="true"></span>
-                                    <label class="layer-item">
-                                        <input id="layerLinksSsb" type="checkbox" checked />
-                                        <span id="lblLayerLinksSsb">SSB</span>
-                                    </label>
-                                </div>
-                            </li>
+                            <li role="treeitem"><div class="node leaf">
+                                <span class="twisty" aria-hidden="true"></span>
+                                <label class="layer-item">
+                                    <input id="layerLinksSsb" type="checkbox" checked />
+                                    <span id="lblLayerLinksSsb">SSB</span>
+                                </label>
+                            </div></li>
 
-                            <li role="treeitem">
-                                <div class="node leaf">
-                                    <span class="twisty" aria-hidden="true"></span>
-                                    <label class="layer-item">
-                                        <input id="layerLinksOther" type="checkbox" checked />
-                                        <span id="lblLayerLinksOther">Ostatní</span>
-                                    </label>
-                                </div>
-                            </li>
+                            <li role="treeitem"><div class="node leaf">
+                                <span class="twisty" aria-hidden="true"></span>
+                                <label class="layer-item">
+                                    <input id="layerLinksOther" type="checkbox" checked />
+                                    <span id="lblLayerLinksOther">Ostatní</span>
+                                </label>
+                            </div></li>
 
-                            <!-- DIGI (Spojnice) -->
                             <li role="treeitem" aria-expanded="true">
                                 <div class="node">
                                     <span class="twisty" aria-hidden="true"></span>
@@ -91,85 +253,30 @@
                                 </div>
 
                                 <ul role="group">
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerLinksDigiFt8" type="checkbox" checked />
-                                                <span id="lblLayerLinksDigiFt8">FT8</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerLinksDigiFt4" type="checkbox" checked />
-                                                <span id="lblLayerLinksDigiFt4">FT4</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerLinksDigiJt65" type="checkbox" checked />
-                                                <span id="lblLayerLinksDigiJt65">JT65</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerLinksDigiRtty" type="checkbox" checked />
-                                                <span id="lblLayerLinksDigiRtty">RTTY</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerLinksDigiPsk31" type="checkbox" checked />
-                                                <span id="lblLayerLinksDigiPsk31">PSK31</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerLinksDigiPsk63" type="checkbox" checked />
-                                                <span id="lblLayerLinksDigiPsk63">PSK63</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerLinksDigiPsk125" type="checkbox" checked />
-                                                <span id="lblLayerLinksDigiPsk125">PSK125</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerLinksDigiSstv" type="checkbox" checked />
-                                                <span id="lblLayerLinksDigiSstv">SSTV</span>
-                                            </label>
-                                        </div>
-                                    </li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerLinksDigiFt8" type="checkbox" checked /><span id="lblLayerLinksDigiFt8">FT8</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerLinksDigiFt4" type="checkbox" checked /><span id="lblLayerLinksDigiFt4">FT4</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerLinksDigiJt65" type="checkbox" checked /><span id="lblLayerLinksDigiJt65">JT65</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerLinksDigiRtty" type="checkbox" checked /><span id="lblLayerLinksDigiRtty">RTTY</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerLinksDigiPsk31" type="checkbox" checked /><span id="lblLayerLinksDigiPsk31">PSK31</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerLinksDigiPsk63" type="checkbox" checked /><span id="lblLayerLinksDigiPsk63">PSK63</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerLinksDigiPsk125" type="checkbox" checked /><span id="lblLayerLinksDigiPsk125">PSK125</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerLinksDigiSstv" type="checkbox" checked /><span id="lblLayerLinksDigiSstv">SSTV</span></label>
+                                    </div></li>
                                 </ul>
                             </li>
                         </ul>
@@ -186,37 +293,30 @@
                         </div>
 
                         <ul role="group">
-                            <li role="treeitem">
-                                <div class="node leaf">
-                                    <span class="twisty" aria-hidden="true"></span>
-                                    <label class="layer-item">
-                                        <input id="layerQsoCw" type="checkbox" checked />
-                                        <span id="lblLayerQsoCw">CW</span>
-                                    </label>
-                                </div>
-                            </li>
+                            <li role="treeitem"><div class="node leaf">
+                                <span class="twisty" aria-hidden="true"></span>
+                                <label class="layer-item">
+                                    <input id="layerQsoCw" type="checkbox" checked />
+                                    <span id="lblLayerQsoCw">CW</span>
+                                </label>
+                            </div></li>
 
-                            <li role="treeitem">
-                                <div class="node leaf">
-                                    <span class="twisty" aria-hidden="true"></span>
-                                    <label class="layer-item">
-                                        <input id="layerQsoSsb" type="checkbox" checked />
-                                        <span id="lblLayerQsoSsb">SSB</span>
-                                    </label>
-                                </div>
-                            </li>
+                            <li role="treeitem"><div class="node leaf">
+                                <span class="twisty" aria-hidden="true"></span>
+                                <label class="layer-item">
+                                    <input id="layerQsoSsb" type="checkbox" checked />
+                                    <span id="lblLayerQsoSsb">SSB</span>
+                                </label>
+                            </div></li>
 
-                            <li role="treeitem">
-                                <div class="node leaf">
-                                    <span class="twisty" aria-hidden="true"></span>
-                                    <label class="layer-item">
-                                        <input id="layerQsoOther" type="checkbox" checked />
-                                        <span id="lblLayerQsoOther">Ostatní</span>
-                                    </label>
-                                </div>
-                            </li>
+                            <li role="treeitem"><div class="node leaf">
+                                <span class="twisty" aria-hidden="true"></span>
+                                <label class="layer-item">
+                                    <input id="layerQsoOther" type="checkbox" checked />
+                                    <span id="lblLayerQsoOther">Ostatní</span>
+                                </label>
+                            </div></li>
 
-                            <!-- DIGI (Mode) -->
                             <li role="treeitem" aria-expanded="true">
                                 <div class="node">
                                     <span class="twisty" aria-hidden="true"></span>
@@ -227,89 +327,35 @@
                                 </div>
 
                                 <ul role="group">
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerQsoDigiFt8" type="checkbox" checked />
-                                                <span id="lblLayerQsoDigiFt8">FT8</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerQsoDigiFt4" type="checkbox" checked />
-                                                <span id="lblLayerQsoDigiFt4">FT4</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerQsoDigiJt65" type="checkbox" checked />
-                                                <span id="lblLayerQsoDigiJt65">JT65</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerQsoDigiRtty" type="checkbox" checked />
-                                                <span id="lblLayerQsoDigiRtty">RTTY</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerQsoDigiPsk31" type="checkbox" checked />
-                                                <span id="lblLayerQsoDigiPsk31">PSK31</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerQsoDigiPsk63" type="checkbox" checked />
-                                                <span id="lblLayerQsoDigiPsk63">PSK63</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerQsoDigiPsk125" type="checkbox" checked />
-                                                <span id="lblLayerQsoDigiPsk125">PSK125</span>
-                                            </label>
-                                        </div>
-                                    </li>
-
-                                    <li role="treeitem">
-                                        <div class="node leaf">
-                                            <span class="twisty" aria-hidden="true"></span>
-                                            <label class="layer-item">
-                                                <input id="layerQsoDigiSstv" type="checkbox" checked />
-                                                <span id="lblLayerQsoDigiSstv">SSTV</span>
-                                            </label>
-                                        </div>
-                                    </li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerQsoDigiFt8" type="checkbox" checked /><span id="lblLayerQsoDigiFt8">FT8</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerQsoDigiFt4" type="checkbox" checked /><span id="lblLayerQsoDigiFt4">FT4</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerQsoDigiJt65" type="checkbox" checked /><span id="lblLayerQsoDigiJt65">JT65</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerQsoDigiRtty" type="checkbox" checked /><span id="lblLayerQsoDigiRtty">RTTY</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerQsoDigiPsk31" type="checkbox" checked /><span id="lblLayerQsoDigiPsk31">PSK31</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerQsoDigiPsk63" type="checkbox" checked /><span id="lblLayerQsoDigiPsk63">PSK63</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerQsoDigiPsk125" type="checkbox" checked /><span id="lblLayerQsoDigiPsk125">PSK125</span></label>
+                                    </div></li>
+                                    <li role="treeitem"><div class="node leaf"><span class="twisty" aria-hidden="true"></span>
+                                        <label class="layer-item"><input id="layerQsoDigiSstv" type="checkbox" checked /><span id="lblLayerQsoDigiSstv">SSTV</span></label>
+                                    </div></li>
                                 </ul>
                             </li>
                         </ul>
                     </li>
+
                 </ul>
             </li>
         </ul>
@@ -322,6 +368,7 @@
     <button id="ctxExportPng" type="button">Export mapy do PNG</button>
 </div>
 
+<!-- Ovládací panel (vpravo vedle vrstev) -->
 <div class="info" id="controlPanel">
     <div class="panel-header">
         <div>

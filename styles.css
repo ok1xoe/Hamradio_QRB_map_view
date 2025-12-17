@@ -1,11 +1,17 @@
 /* styles.css */
+:root{
+    --gap: 12px;
+    --layers-width: 320px;
+}
+
 html, body { height: 100%; margin: 0; }
 #map { width: 100%; height: 100%; }
 
+/* Ovládací panel (vpravo od vrstev) */
 .info {
     position: absolute;
-    top: 12px;
-    left: 12px;
+    top: var(--gap);
+    left: calc(var(--gap) + var(--layers-width) + var(--gap));
     background: rgba(255,255,255,0.95);
     padding: 10px 14px;
     border-radius: 8px;
@@ -30,8 +36,6 @@ html, body { height: 100%; margin: 0; }
 .info input { cursor: text; width: 250px; }
 .info textarea { cursor: text; width: 100%; min-height: 92px; resize: vertical; }
 .info button:hover { background: #f5f5f5; }
-
-/* původní řádek ".info checkbox {align: left}" nebyl validní CSS selector ani vlastnost */
 
 .muted { opacity: 0.75; font-size: 12px; margin-top: 6px; }
 
@@ -90,7 +94,7 @@ html, body { height: 100%; margin: 0; }
 #controlPanel.collapsed .muted { display: none; }
 #controlPanel.collapsed .panel-body { display: none; }
 
-/* Tooltip na mapě (hover 2s) */
+/* Tooltip na mapě */
 .qrb-tooltip {
     position: relative;
     background: rgba(255,255,255,0.98);
@@ -116,30 +120,20 @@ html, body { height: 100%; margin: 0; }
     border-top: 8px solid rgba(255,255,255,0.98);
     filter: drop-shadow(0 2px 1px rgba(0,0,0,0.12));
 }
-.qrb-tooltip .title {
-    font-weight: 700;
-    margin-bottom: 4px;
-}
-.qrb-tooltip .line {
-    display: flex;
-    gap: 8px;
-    justify-content: space-between;
-}
-.qrb-tooltip .key {
-    opacity: 0.7;
-    min-width: 90px;
-}
+.qrb-tooltip .title { font-weight: 700; margin-bottom: 4px; }
+.qrb-tooltip .line { display: flex; gap: 8px; justify-content: space-between; }
+.qrb-tooltip .key { opacity: 0.7; min-width: 90px; }
 .qrb-tooltip .val {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     text-align: right;
     overflow-wrap: anywhere;
 }
 
-/* Okno: Vrstvy */
+/* Okno: Vrstvy (vlevo) */
 .layers {
     position: absolute;
     z-index: 1001;
-    width: 240px;
+    width: var(--layers-width);
     background: rgba(255, 255, 255, 0.92);
     border: 1px solid rgba(0,0,0,0.12);
     border-radius: 10px;
@@ -149,9 +143,12 @@ html, body { height: 100%; margin: 0; }
     font-size: 13px;
     line-height: 1.35;
 
-    /* výchozí hodnota; finální pozici nastaví JS pod hlavní panel */
-    top: 12px;
-    left: 12px;
+    top: var(--gap);
+    left: var(--gap);
+
+    max-height: calc(100vh - (var(--gap) * 2));
+    display: flex;
+    flex-direction: column;
 }
 
 .layers-header {
@@ -160,27 +157,18 @@ html, body { height: 100%; margin: 0; }
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex: 0 0 auto;
 }
-
-.layers-header .title {
-    font-weight: 700;
-}
+.layers-header .title { font-weight: 700; }
 
 .layers-body {
     padding: 10px 12px 12px;
+    overflow: auto;
+    flex: 1 1 auto;
 }
 
-.layers-tree {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-}
-
-.layers-tree ul {
-    list-style: none;
-    margin: 6px 0 0 18px;
-    padding: 0;
-}
+.layers-tree { list-style: none; margin: 0; padding: 0; }
+.layers-tree ul { list-style: none; margin: 6px 0 0 18px; padding: 0; }
 
 .layers-tree .node {
     display: flex;
@@ -188,6 +176,10 @@ html, body { height: 100%; margin: 0; }
     gap: 8px;
     margin: 3px 0;
 }
+
+/* zarovnání vlevo, a pokud existuje barva, tlačítko vpravo */
+.layers-tree .node.leaf { justify-content: flex-start; }
+.layers-tree .node.leaf .color-btn { margin-left: auto; }
 
 .layers-tree .twisty {
     width: 10px;
@@ -198,11 +190,7 @@ html, body { height: 100%; margin: 0; }
     transform: rotate(-45deg);
     margin-left: 2px;
 }
-
-.layers-tree .node.leaf .twisty {
-    border-left-color: transparent;
-    border-bottom-color: transparent;
-}
+.layers-tree .node.leaf .twisty { border-left-color: transparent; border-bottom-color: transparent; }
 
 .layer-item {
     display: inline-flex;
@@ -210,8 +198,40 @@ html, body { height: 100%; margin: 0; }
     align-items: center;
     user-select: none;
 }
+.layer-item input[type="checkbox"] { width: 16px; height: 16px; }
 
-.layer-item input[type="checkbox"] {
+/* barva */
+.color-btn {
+    border: 1px solid rgba(0,0,0,0.18);
+    background: rgba(255,255,255,0.95);
+    border-radius: 8px;
+    padding: 3px 6px;
+    cursor: pointer;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.color-btn:hover { background: rgba(0,0,0,0.04); }
+
+.color-btn .swatch {
     width: 16px;
-    height: 16px;
+    height: 10px;
+    border-radius: 4px;
+    border: 1px solid rgba(0,0,0,0.25);
+    background: #000;
+    display: inline-block;
+}
+
+/* Responsive */
+@media (max-width: 920px) {
+    .info {
+        left: var(--gap);
+        top: calc(var(--gap) + 260px + var(--gap));
+        max-width: calc(100vw - (var(--gap) * 2));
+    }
+    .layers {
+        width: calc(100vw - (var(--gap) * 2));
+        max-height: 240px;
+    }
 }

@@ -13,8 +13,63 @@ import { exportMapAsPng } from './exportPng.js';
 import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
 (() => {
-    const zlinskyExtentWGS84 = [16.8, 48.95, 18.6, 49.75];
-    const zlinskyExtent3857 = ol.proj.transformExtent(zlinskyExtentWGS84, 'EPSG:4326', 'EPSG:3857');
+    const STORAGE_KEY = 'qrbMapViewer.v1';
+
+    function safeJsonParse(s) {
+        try { return JSON.parse(s); } catch { return null; }
+    }
+
+    function loadSettings() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const obj = raw ? safeJsonParse(raw) : null;
+        return (obj && typeof obj === 'object') ? obj : {};
+    }
+
+    function saveSettings(patch) {
+        const cur = loadSettings();
+        const next = { ...cur, ...patch };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        return next;
+    }
+
+    function ensureSettingsShape(s) {
+        const out = (s && typeof s === 'object') ? { ...s } : {};
+        if (!out.colors || typeof out.colors !== 'object') out.colors = {};
+        if (!out.layerStates || typeof out.layerStates !== 'object') out.layerStates = {};
+        return out;
+    }
+
+    let settings = ensureSettingsShape(loadSettings());
+
+    const defaultColors = {
+        'dxcc.cw': '#ff3b30',
+        'dxcc.ssb': '#ff9500',
+        'dxcc.other': '#8e8e93',
+
+        'dxcc.digi.ft8': '#34c759',
+        'dxcc.digi.ft4': '#30b0c7',
+        'dxcc.digi.jt65': '#5856d6',
+        'dxcc.digi.rtty': '#ff2d55',
+        'dxcc.digi.psk31': '#007aff',
+        'dxcc.digi.psk63': '#0a84ff',
+        'dxcc.digi.psk125': '#64d2ff',
+        'dxcc.digi.sstv': '#af52de'
+    };
+
+    function getColor(key) {
+        const fromStore = settings?.colors?.[key];
+        if (typeof fromStore === 'string' && fromStore.trim()) return fromStore.trim();
+        return defaultColors[key] || '#ff3b30';
+    }
+
+    function hexToRgba(hex, a = 0.35) {
+        const h = String(hex || '').trim().replace('#', '');
+        if (!/^[0-9a-fA-F]{6}$/.test(h)) return `rgba(255,0,0,${a})`;
+        const r = parseInt(h.slice(0, 2), 16);
+        const g = parseInt(h.slice(2, 4), 16);
+        const b = parseInt(h.slice(4, 6), 16);
+        return `rgba(${r},${g},${b},${a})`;
+    }
 
     // UI refs
     const ui = {
@@ -50,58 +105,268 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
         langSelect: document.getElementById('lang'),
 
-        // panel vrstev
-        layersPanelEl: document.getElementById('layersPanel'),
-        layerMapCheckbox: document.getElementById('layerMap'),
-        layerDxccCheckbox: document.getElementById('layerDxcc'),
-
-        // Spojnice
-        layerLinksCheckbox: document.getElementById('layerLinks'),
-        layerLinksCwCheckbox: document.getElementById('layerLinksCw'),
-        layerLinksSsbCheckbox: document.getElementById('layerLinksSsb'),
-        layerLinksOtherCheckbox: document.getElementById('layerLinksOther'),
-
-        // Spojnice > DIGI + podvrstvy
-        layerLinksDigiCheckbox: document.getElementById('layerLinksDigi'),
-        layerLinksDigiFt8Checkbox: document.getElementById('layerLinksDigiFt8'),
-        layerLinksDigiFt4Checkbox: document.getElementById('layerLinksDigiFt4'),
-        layerLinksDigiJt65Checkbox: document.getElementById('layerLinksDigiJt65'),
-        layerLinksDigiRttyCheckbox: document.getElementById('layerLinksDigiRtty'),
-        layerLinksDigiPsk31Checkbox: document.getElementById('layerLinksDigiPsk31'),
-        layerLinksDigiPsk63Checkbox: document.getElementById('layerLinksDigiPsk63'),
-        layerLinksDigiPsk125Checkbox: document.getElementById('layerLinksDigiPsk125'),
-        layerLinksDigiSstvCheckbox: document.getElementById('layerLinksDigiSstv'),
-
-        // Mode (jen filtrace bodů)
-        layerQsoCheckbox: document.getElementById('layerQso'),
-        layerQsoCwCheckbox: document.getElementById('layerQsoCw'),
-        layerQsoSsbCheckbox: document.getElementById('layerQsoSsb'),
-        layerQsoOtherCheckbox: document.getElementById('layerQsoOther'),
-
-        // Mode > DIGI + podvrstvy
-        layerQsoDigiCheckbox: document.getElementById('layerQsoDigi'),
-        layerQsoDigiFt8Checkbox: document.getElementById('layerQsoDigiFt8'),
-        layerQsoDigiFt4Checkbox: document.getElementById('layerQsoDigiFt4'),
-        layerQsoDigiJt65Checkbox: document.getElementById('layerQsoDigiJt65'),
-        layerQsoDigiRttyCheckbox: document.getElementById('layerQsoDigiRtty'),
-        layerQsoDigiPsk31Checkbox: document.getElementById('layerQsoDigiPsk31'),
-        layerQsoDigiPsk63Checkbox: document.getElementById('layerQsoDigiPsk63'),
-        layerQsoDigiPsk125Checkbox: document.getElementById('layerQsoDigiPsk125'),
-        layerQsoDigiSstvCheckbox: document.getElementById('layerQsoDigiSstv')
+        layersPanelEl: document.getElementById('layersPanel')
     };
 
+    // ========= i18n =========
     const dict = createI18n();
     let currentLang = normalizeLang(ui.langSelect?.value);
 
-    let importedByLocator = new Map();
-    let targetsMode = 'LOC';
+    function t() {
+        return dict[currentLang] || dict.cs;
+    }
 
+    function isPanelCollapsed() {
+        return ui.controlPanel?.classList?.contains('collapsed');
+    }
+
+    function setLanguage(lang) {
+        currentLang = normalizeLang(lang);
+        if (ui.langSelect) ui.langSelect.value = currentLang;
+        applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed: () => isPanelCollapsed() });
+        refreshGrid();
+    }
+
+    // Panel collapse
+    if (ui.togglePanelBtn && ui.controlPanel && ui.panelBodyEl) {
+        ui.togglePanelBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const collapsed = ui.controlPanel.classList.toggle('collapsed');
+            ui.panelBodyEl.style.display = collapsed ? 'none' : 'block';
+            applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed: () => isPanelCollapsed() });
+        });
+    }
+
+    // ========= Helpers: checkbox =========
+    function isChecked(id) {
+        const el = document.getElementById(id);
+        return Boolean(el && el.checked);
+    }
+
+    // ========= Persist: QTH + barvy + checkboxy =========
+    function persistAllLayerCheckboxStates() {
+        if (!ui.layersPanelEl) return;
+        const inputs = ui.layersPanelEl.querySelectorAll('input[type="checkbox"][id]');
+        const next = {};
+        for (const el of inputs) {
+            if (el.disabled) continue;
+            next[el.id] = Boolean(el.checked);
+        }
+        settings = saveSettings({ layerStates: next });
+    }
+
+    function applyPersistedLayerCheckboxStates() {
+        const s = ensureSettingsShape(loadSettings());
+        const st = s.layerStates || {};
+        if (!ui.layersPanelEl) return;
+
+        const inputs = ui.layersPanelEl.querySelectorAll('input[type="checkbox"][id]');
+        for (const el of inputs) {
+            if (el.disabled) continue;
+            if (typeof st[el.id] === 'boolean') el.checked = st[el.id];
+        }
+    }
+
+    function bindPersistLayerCheckboxes() {
+        if (!ui.layersPanelEl) return;
+        ui.layersPanelEl.addEventListener('change', (e) => {
+            const el = e.target;
+            if (!(el instanceof HTMLInputElement)) return;
+            if (el.type !== 'checkbox') return;
+            if (!el.id) return;
+            if (el.disabled) return;
+
+            persistAllLayerCheckboxStates();
+        });
+    }
+
+    // ========= Tree checkbox logic (parent/children) =========
+    let treeSyncLock = false;
+
+    function getTreeItemElFromCheckbox(cb) {
+        return cb?.closest?.('li[role="treeitem"]') ?? null;
+    }
+
+    function getOwnCheckbox(treeItemEl) {
+        return treeItemEl?.querySelector?.(':scope > .node input[type="checkbox"]') ?? null;
+    }
+
+    function getDirectChildTreeItems(treeItemEl) {
+        const group = treeItemEl?.querySelector?.(':scope > ul[role="group"]');
+        if (!group) return [];
+        return Array.from(group.querySelectorAll(':scope > li[role="treeitem"]'));
+    }
+
+    function setTreeSubtreeChecked(treeItemEl, checked) {
+        const childItems = getDirectChildTreeItems(treeItemEl);
+        for (const child of childItems) {
+            const cb = getOwnCheckbox(child);
+            if (cb && !cb.disabled) {
+                cb.indeterminate = false;
+                cb.checked = checked;
+            }
+            setTreeSubtreeChecked(child, checked);
+        }
+    }
+
+    function updateParentFromChildren(treeItemEl) {
+        const parentCb = getOwnCheckbox(treeItemEl);
+        if (!parentCb || parentCb.disabled) return;
+
+        const children = getDirectChildTreeItems(treeItemEl)
+            .map(getOwnCheckbox)
+            .filter(Boolean)
+            .filter(cb => !cb.disabled);
+
+        if (!children.length) {
+            parentCb.indeterminate = false;
+            return;
+        }
+
+        const anyOn = children.some(cb => cb.checked || cb.indeterminate);
+        const allOn = children.every(cb => cb.checked && !cb.indeterminate);
+
+        if (!anyOn) {
+            parentCb.indeterminate = false;
+            parentCb.checked = false;
+        } else if (allOn) {
+            parentCb.indeterminate = false;
+            parentCb.checked = true;
+        } else {
+            parentCb.checked = true;
+            parentCb.indeterminate = true;
+        }
+    }
+
+    function updateAncestors(treeItemEl) {
+        let cur = treeItemEl;
+        while (cur) {
+            const parent = cur.parentElement?.closest?.('li[role="treeitem"]') ?? null;
+            if (!parent) break;
+            updateParentFromChildren(parent);
+            cur = parent;
+        }
+    }
+
+    function syncWholeTree(panelEl) {
+        const allItems = Array.from(panelEl.querySelectorAll('li[role="treeitem"]'));
+
+        // 1) pokud rodič není checked, vynutit vypnutí všech potomků
+        for (const it of allItems) {
+            const cb = getOwnCheckbox(it);
+            if (!cb) continue;
+            if (!cb.checked && !cb.indeterminate) {
+                setTreeSubtreeChecked(it, false);
+            }
+        }
+
+        // 2) dopočítat rodiče odspoda
+        for (let i = allItems.length - 1; i >= 0; i--) {
+            updateParentFromChildren(allItems[i]);
+        }
+    }
+
+    function bindTreeCheckboxLogic(onTreeChanged) {
+        if (!ui.layersPanelEl) return;
+
+        ui.layersPanelEl.addEventListener('change', (e) => {
+            const cb = e.target;
+            if (!(cb instanceof HTMLInputElement)) return;
+            if (cb.type !== 'checkbox') return;
+
+            if (treeSyncLock) return;
+            treeSyncLock = true;
+
+            try {
+                const item = getTreeItemElFromCheckbox(cb);
+                if (!item) return;
+
+                // toggle subtree
+                setTreeSubtreeChecked(item, cb.checked);
+                cb.indeterminate = false;
+
+                // update parents
+                updateParentFromChildren(item);
+                updateAncestors(item);
+
+                // persist ALL because programmatic updates don't emit change
+                persistAllLayerCheckboxStates();
+
+                if (typeof onTreeChanged === 'function') onTreeChanged();
+            } finally {
+                treeSyncLock = false;
+            }
+        });
+    }
+
+    // ========= Color picker =========
+    function setSwatch(key, color) {
+        const el = document.querySelector(`[data-swatch-key="${CSS.escape(key)}"]`);
+        if (el) el.style.background = color;
+    }
+
+    function updateAllSwatches() {
+        const swatches = document.querySelectorAll('[data-swatch-key]');
+        for (const el of swatches) {
+            const key = el.getAttribute('data-swatch-key');
+            if (!key) continue;
+            el.style.background = getColor(key);
+        }
+    }
+
+    function promptForColor(initial) {
+        return new Promise((resolve) => {
+            const input = document.createElement('input');
+            input.type = 'color';
+            input.value = initial;
+            input.style.position = 'fixed';
+            input.style.left = '-9999px';
+            input.style.top = '-9999px';
+            document.body.appendChild(input);
+
+            const cleanup = () => {
+                input.removeEventListener('change', onChange);
+                input.remove();
+            };
+
+            const onChange = () => {
+                const val = String(input.value || '').trim();
+                cleanup();
+                resolve(val || null);
+            };
+
+            input.addEventListener('change', onChange);
+            input.click();
+        });
+    }
+
+    function bindColorButtons(onColorChanged) {
+        updateAllSwatches();
+
+        document.addEventListener('click', async (e) => {
+            const btn = e.target?.closest?.('.color-btn');
+            if (!btn) return;
+
+            const key = btn.getAttribute('data-color-key');
+            if (!key) return;
+
+            const current = getColor(key);
+            const chosen = await promptForColor(current);
+            if (!chosen) return;
+
+            const s = ensureSettingsShape(loadSettings());
+            settings = saveSettings({ colors: { ...(s.colors || {}), [key]: chosen } });
+
+            setSwatch(key, chosen);
+            if (typeof onColorChanged === 'function') onColorChanged();
+        });
+    }
+
+    // ========= DXCC index / geometry =========
     let dxccIndex = null;
     let dxccIndexPromise = null;
-
-    const workedDxccEntityCodes = new Set();
-    let dxccGeomLoaded = false;
-    let dxccGeomPromise = null;
 
     function ensureDxccLoaded() {
         if (dxccIndex) return Promise.resolve(dxccIndex);
@@ -122,74 +387,32 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         return dxccIndexPromise;
     }
 
-    function isPanelCollapsed() {
-        return ui.controlPanel?.classList?.contains('collapsed');
+    const workedDxcc = {
+        cw: new Set(),
+        ssb: new Set(),
+        other: new Set(),
+        digi: {
+            ft8: new Set(),
+            ft4: new Set(),
+            jt65: new Set(),
+            rtty: new Set(),
+            psk31: new Set(),
+            psk63: new Set(),
+            psk125: new Set(),
+            sstv: new Set()
+        }
+    };
+
+    function clearWorkedDxccSets() {
+        workedDxcc.cw.clear();
+        workedDxcc.ssb.clear();
+        workedDxcc.other.clear();
+        for (const k of Object.keys(workedDxcc.digi)) workedDxcc.digi[k].clear();
     }
-
-    function positionLayersPanel() {
-        if (!ui.layersPanelEl || !ui.controlPanel) return;
-
-        const cpRect = ui.controlPanel.getBoundingClientRect();
-        const gap = 10;
-        const top = Math.round(cpRect.bottom + gap);
-        const left = Math.round(cpRect.left);
-
-        ui.layersPanelEl.style.top = `${top}px`;
-        ui.layersPanelEl.style.left = `${left}px`;
-    }
-
-    function t() {
-        return dict[currentLang] || dict.cs;
-    }
-
-    function setLanguage(lang) {
-        currentLang = normalizeLang(lang);
-        if (ui.langSelect) ui.langSelect.value = currentLang;
-        applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed: () => isPanelCollapsed() });
-        refreshGrid();
-        positionLayersPanel();
-    }
-
-    // Panel collapse
-    if (ui.togglePanelBtn && ui.controlPanel && ui.panelBodyEl) {
-        ui.togglePanelBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const collapsed = ui.controlPanel.classList.toggle('collapsed');
-            ui.panelBodyEl.style.display = collapsed ? 'none' : 'block';
-            applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed: () => isPanelCollapsed() });
-
-            positionLayersPanel();
-        });
-    }
-
-    // Map + layers
-    const osmLayer = new ol.layer.Tile({ source: new ol.source.OSM() });
-    osmLayer.set('name', 'Mapa');
 
     const dxccGeomSource = new ol.source.Vector();
-    const dxccLayer = new ol.layer.Vector({
-        source: dxccGeomSource,
-        opacity: 0.5,
-        style: (feature) => {
-            const props = feature.getProperties() || {};
-            const code = Number(props.dxcc_entity_code);
-            const isWorked = Number.isFinite(code) && workedDxccEntityCodes.has(code);
-
-            return new ol.style.Style({
-                fill: new ol.style.Fill({
-                    color: isWorked ? 'rgba(255,0,0,0.50)' : 'rgba(255,0,0,0.00)'
-                }),
-                stroke: new ol.style.Stroke({
-                    color: 'rgba(255,0,0,0.18)',
-                    width: 1
-                })
-            });
-        }
-    });
-    dxccLayer.set('name', 'DXCC');
-    dxccLayer.setZIndex(5);
+    let dxccGeomLoaded = false;
+    let dxccGeomPromise = null;
 
     async function ensureDxccGeometryLoaded() {
         if (dxccGeomLoaded) return true;
@@ -223,7 +446,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         return dxccGeomPromise;
     }
 
-    // --- FIX: chybějící DXCC helpery pro ADIF ---
     function getDxccFeatureByEntityCode(entityCode) {
         const codeNum = Number(entityCode);
         if (!Number.isFinite(codeNum)) return null;
@@ -249,12 +471,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
         return ol.extent.getCenter(ext);
     }
-    // --- /FIX ---
 
-    // ===== MODE/DETEKCE (CW/SSB/DIGI/OTHER + submode u DIGI) =====
-    const DIGI_SUBMODES = Object.freeze([
-        'FT8', 'FT4', 'JT65', 'RTTY', 'PSK31', 'PSK63', 'PSK125', 'SSTV'
-    ]);
+    // ========= Mode parsing =========
+    const DIGI_SUBMODES = Object.freeze(['FT8', 'FT4', 'JT65', 'RTTY', 'PSK31', 'PSK63', 'PSK125', 'SSTV']);
 
     function normalizeModeStr(modeStr) {
         return String(modeStr ?? '').trim().toUpperCase();
@@ -280,7 +499,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     function detectFeatureModeInfo(feature) {
-        // Prefer explicit fields (we store them on features)
         const bucket = feature.get('qsoMode');
         const sub = feature.get('qsoModeSub');
 
@@ -297,35 +515,124 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         return { bucket: 'OTHER', sub: null };
     }
 
-    // ===== SPOJNICE: CW/SSB/DIGI(FT8..)/OTHER =====
-    const linksCwSource = new ol.source.Vector();
-    const linksCwLayer = new ol.layer.Vector({
-        source: linksCwSource,
-        style: new ol.style.Style({
-            stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.45)', width: 1.5, lineDash: [8, 6] })
-        })
+    // ========= OL layers =========
+    const osmLayer = new ol.layer.Tile({ source: new ol.source.OSM() });
+    osmLayer.set('name', 'Mapa');
+
+    // pattern fill (multi-mode) for DXCC
+    const patternCache = new Map();
+    function createStripePatternRgba(rgbaColors) {
+        const key = rgbaColors.join('|');
+        const cached = patternCache.get(key);
+        if (cached) return cached;
+
+        const n = rgbaColors.length;
+        const stripeW = 12;
+        const w = Math.max(12, n * stripeW);
+        const h = 24;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+
+        for (let i = 0; i < n; i++) {
+            ctx.fillStyle = rgbaColors[i];
+            ctx.fillRect(i * stripeW, 0, stripeW, h);
+        }
+
+        const pattern = ctx.createPattern(canvas, 'repeat');
+        patternCache.set(key, pattern);
+        return pattern;
+    }
+
+    function pickDxccModeColorsForEntity(entityCode) {
+        const colors = [];
+
+        if (isChecked('layerDxccCw') && workedDxcc.cw.has(entityCode)) colors.push(getColor('dxcc.cw'));
+        if (isChecked('layerDxccSsb') && workedDxcc.ssb.has(entityCode)) colors.push(getColor('dxcc.ssb'));
+        if (isChecked('layerDxccOther') && workedDxcc.other.has(entityCode)) colors.push(getColor('dxcc.other'));
+
+        if (isChecked('layerDxccDigi')) {
+            const subOrder = ['ft8','ft4','jt65','rtty','psk31','psk63','psk125','sstv'];
+            for (const k of subOrder) {
+                const id = `layerDxccDigi${k[0].toUpperCase()}${k.slice(1)}`;
+                if (!isChecked(id)) continue;
+                if (workedDxcc.digi[k].has(entityCode)) colors.push(getColor(`dxcc.digi.${k}`));
+            }
+        }
+
+        return Array.from(new Set(colors));
+    }
+
+    const dxccLayer = new ol.layer.Vector({
+        source: dxccGeomSource,
+        opacity: 0.95,
+        style: (feature) => {
+            const props = feature.getProperties() || {};
+            const code = Number(props.dxcc_entity_code);
+
+            let fill = new ol.style.Fill({ color: 'rgba(255,0,0,0.00)' });
+
+            if (Number.isFinite(code) && isChecked('layerDxcc')) {
+                const baseColors = pickDxccModeColorsForEntity(code);
+                if (baseColors.length === 1) {
+                    fill = new ol.style.Fill({ color: hexToRgba(baseColors[0], 0.35) });
+                } else if (baseColors.length > 1) {
+                    const rgbaColors = baseColors.map(c => hexToRgba(c, 0.35));
+                    const pattern = createStripePatternRgba(rgbaColors);
+                    fill = new ol.style.Fill({ color: pattern });
+                }
+            }
+
+            return new ol.style.Style({
+                fill,
+                stroke: new ol.style.Stroke({ color: 'rgba(255,0,0,0.18)', width: 1 })
+            });
+        }
     });
+    dxccLayer.set('name', 'DXCC');
+    dxccLayer.setZIndex(5);
+
+    function linkStrokeColor(bucket, sub) {
+        if (bucket === 'CW') return getColor('dxcc.cw');
+        if (bucket === 'SSB') return getColor('dxcc.ssb');
+        if (bucket === 'OTHER') return getColor('dxcc.other');
+        if (bucket === 'DIGI') {
+            const k = String(sub || '').toLowerCase();
+            const key = `dxcc.digi.${k}`;
+            return (defaultColors[key] || settings.colors[key]) ? getColor(key) : getColor('dxcc.digi.ft8');
+        }
+        return '#000000';
+    }
+
+    function makeLinkStyle(bucket, sub) {
+        return () => new ol.style.Style({
+            stroke: new ol.style.Stroke({
+                color: linkStrokeColor(bucket, sub),
+                width: 1.5,
+                lineDash: [8, 6]
+            })
+        });
+    }
+
+    const linksCwSource = new ol.source.Vector();
+    const linksCwLayer = new ol.layer.Vector({ source: linksCwSource, style: makeLinkStyle('CW') });
     linksCwLayer.set('name', 'Spojnice CW');
     linksCwLayer.setZIndex(7);
 
     const linksSsbSource = new ol.source.Vector();
-    const linksSsbLayer = new ol.layer.Vector({
-        source: linksSsbSource,
-        style: new ol.style.Style({
-            stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.45)', width: 1.5, lineDash: [8, 6] })
-        })
-    });
+    const linksSsbLayer = new ol.layer.Vector({ source: linksSsbSource, style: makeLinkStyle('SSB') });
     linksSsbLayer.set('name', 'Spojnice SSB');
     linksSsbLayer.setZIndex(7);
 
-    // DIGI sublayers (links)
-    function makeLinksDigiLayer(name, source) {
-        const layer = new ol.layer.Vector({
-            source,
-            style: new ol.style.Style({
-                stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.45)', width: 1.5, lineDash: [8, 6] })
-            })
-        });
+    const linksOtherSource = new ol.source.Vector();
+    const linksOtherLayer = new ol.layer.Vector({ source: linksOtherSource, style: makeLinkStyle('OTHER') });
+    linksOtherLayer.set('name', 'Spojnice Other');
+    linksOtherLayer.setZIndex(7);
+
+    function makeLinksDigiLayer(name, source, sub) {
+        const layer = new ol.layer.Vector({ source, style: makeLinkStyle('DIGI', sub) });
         layer.set('name', `Spojnice DIGI ${name}`);
         layer.setZIndex(7);
         return layer;
@@ -340,39 +647,23 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     const linksDigiPsk125Source = new ol.source.Vector();
     const linksDigiSstvSource = new ol.source.Vector();
 
-    const linksDigiFt8Layer = makeLinksDigiLayer('FT8', linksDigiFt8Source);
-    const linksDigiFt4Layer = makeLinksDigiLayer('FT4', linksDigiFt4Source);
-    const linksDigiJt65Layer = makeLinksDigiLayer('JT65', linksDigiJt65Source);
-    const linksDigiRttyLayer = makeLinksDigiLayer('RTTY', linksDigiRttySource);
-    const linksDigiPsk31Layer = makeLinksDigiLayer('PSK31', linksDigiPsk31Source);
-    const linksDigiPsk63Layer = makeLinksDigiLayer('PSK63', linksDigiPsk63Source);
-    const linksDigiPsk125Layer = makeLinksDigiLayer('PSK125', linksDigiPsk125Source);
-    const linksDigiSstvLayer = makeLinksDigiLayer('SSTV', linksDigiSstvSource);
+    const linksDigiFt8Layer = makeLinksDigiLayer('FT8', linksDigiFt8Source, 'FT8');
+    const linksDigiFt4Layer = makeLinksDigiLayer('FT4', linksDigiFt4Source, 'FT4');
+    const linksDigiJt65Layer = makeLinksDigiLayer('JT65', linksDigiJt65Source, 'JT65');
+    const linksDigiRttyLayer = makeLinksDigiLayer('RTTY', linksDigiRttySource, 'RTTY');
+    const linksDigiPsk31Layer = makeLinksDigiLayer('PSK31', linksDigiPsk31Source, 'PSK31');
+    const linksDigiPsk63Layer = makeLinksDigiLayer('PSK63', linksDigiPsk63Source, 'PSK63');
+    const linksDigiPsk125Layer = makeLinksDigiLayer('PSK125', linksDigiPsk125Source, 'PSK125');
+    const linksDigiSstvLayer = makeLinksDigiLayer('SSTV', linksDigiSstvSource, 'SSTV');
 
     const linksDigiGroupLayer = new ol.layer.Group({
         layers: [
-            linksDigiFt8Layer,
-            linksDigiFt4Layer,
-            linksDigiJt65Layer,
-            linksDigiRttyLayer,
-            linksDigiPsk31Layer,
-            linksDigiPsk63Layer,
-            linksDigiPsk125Layer,
-            linksDigiSstvLayer
+            linksDigiFt8Layer, linksDigiFt4Layer, linksDigiJt65Layer, linksDigiRttyLayer,
+            linksDigiPsk31Layer, linksDigiPsk63Layer, linksDigiPsk125Layer, linksDigiSstvLayer
         ]
     });
     linksDigiGroupLayer.set('name', 'Spojnice DIGI');
     linksDigiGroupLayer.setZIndex(7);
-
-    const linksOtherSource = new ol.source.Vector();
-    const linksOtherLayer = new ol.layer.Vector({
-        source: linksOtherSource,
-        style: new ol.style.Style({
-            stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.45)', width: 1.5, lineDash: [8, 6] })
-        })
-    });
-    linksOtherLayer.set('name', 'Spojnice Other');
-    linksOtherLayer.setZIndex(7);
 
     const linksGroupLayer = new ol.layer.Group({
         layers: [linksCwLayer, linksSsbLayer, linksDigiGroupLayer, linksOtherLayer]
@@ -380,55 +671,34 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     linksGroupLayer.set('name', 'Spojnice');
     linksGroupLayer.setZIndex(7);
 
-    // ===== MODE: CW/SSB/DIGI(FT8..)/OTHER (jen filtrace bodů) =====
+    // Mode visibility layers (only for filtering)
     const modeCwLayer = new ol.layer.Vector({ source: new ol.source.Vector() });
-    modeCwLayer.set('name', 'Mode CW');
-    modeCwLayer.setZIndex(8);
-
     const modeSsbLayer = new ol.layer.Vector({ source: new ol.source.Vector() });
-    modeSsbLayer.set('name', 'Mode SSB');
-    modeSsbLayer.setZIndex(8);
-
     const modeOtherLayer = new ol.layer.Vector({ source: new ol.source.Vector() });
-    modeOtherLayer.set('name', 'Mode Other');
-    modeOtherLayer.setZIndex(8);
 
-    // DIGI sublayers (mode visibility toggles)
-    function makeModeDigiLayer(name) {
-        const layer = new ol.layer.Vector({ source: new ol.source.Vector() });
-        layer.set('name', `Mode DIGI ${name}`);
-        layer.setZIndex(8);
-        return layer;
+    function makeModeDigiLayer() {
+        return new ol.layer.Vector({ source: new ol.source.Vector() });
     }
 
-    const modeDigiFt8Layer = makeModeDigiLayer('FT8');
-    const modeDigiFt4Layer = makeModeDigiLayer('FT4');
-    const modeDigiJt65Layer = makeModeDigiLayer('JT65');
-    const modeDigiRttyLayer = makeModeDigiLayer('RTTY');
-    const modeDigiPsk31Layer = makeModeDigiLayer('PSK31');
-    const modeDigiPsk63Layer = makeModeDigiLayer('PSK63');
-    const modeDigiPsk125Layer = makeModeDigiLayer('PSK125');
-    const modeDigiSstvLayer = makeModeDigiLayer('SSTV');
+    const modeDigiFt8Layer = makeModeDigiLayer();
+    const modeDigiFt4Layer = makeModeDigiLayer();
+    const modeDigiJt65Layer = makeModeDigiLayer();
+    const modeDigiRttyLayer = makeModeDigiLayer();
+    const modeDigiPsk31Layer = makeModeDigiLayer();
+    const modeDigiPsk63Layer = makeModeDigiLayer();
+    const modeDigiPsk125Layer = makeModeDigiLayer();
+    const modeDigiSstvLayer = makeModeDigiLayer();
 
     const modeDigiGroupLayer = new ol.layer.Group({
         layers: [
-            modeDigiFt8Layer,
-            modeDigiFt4Layer,
-            modeDigiJt65Layer,
-            modeDigiRttyLayer,
-            modeDigiPsk31Layer,
-            modeDigiPsk63Layer,
-            modeDigiPsk125Layer,
-            modeDigiSstvLayer
+            modeDigiFt8Layer, modeDigiFt4Layer, modeDigiJt65Layer, modeDigiRttyLayer,
+            modeDigiPsk31Layer, modeDigiPsk63Layer, modeDigiPsk125Layer, modeDigiSstvLayer
         ]
     });
-    modeDigiGroupLayer.set('name', 'Mode DIGI');
-    modeDigiGroupLayer.setZIndex(8);
 
     const modeGroupLayer = new ol.layer.Group({
         layers: [modeCwLayer, modeSsbLayer, modeDigiGroupLayer, modeOtherLayer]
     });
-    modeGroupLayer.set('name', 'Mode');
     modeGroupLayer.setZIndex(8);
 
     function isDigiSubmodeVisible(sub) {
@@ -445,19 +715,19 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     function isModeVisible(bucket, sub) {
+        if (!modeGroupLayer.getVisible()) return false;
+
         if (bucket === 'CW') return modeCwLayer.getVisible();
         if (bucket === 'SSB') return modeSsbLayer.getVisible();
         if (bucket === 'OTHER') return modeOtherLayer.getVisible();
-
-        if (bucket === 'DIGI') {
-            if (!modeDigiGroupLayer.getVisible()) return false;
-            return isDigiSubmodeVisible(sub);
-        }
-
+        if (bucket === 'DIGI') return modeDigiGroupLayer.getVisible() && isDigiSubmodeVisible(sub);
         return false;
     }
 
-    // grid/highlight/targets/qth
+    function pointFillColor(bucket, sub) {
+        return linkStrokeColor(bucket, sub);
+    }
+
     const gridSource = new ol.source.Vector();
     const gridLayer = new ol.layer.Vector({
         source: gridSource,
@@ -491,7 +761,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             return new ol.style.Style({
                 image: new ol.style.Circle({
                     radius: 5,
-                    fill: new ol.style.Fill({ color: '#00a36c' }),
+                    fill: new ol.style.Fill({ color: pointFillColor(mi.bucket, mi.sub) }),
                     stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 })
                 }),
                 text: new ol.style.Text({
@@ -544,7 +814,97 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         view
     });
 
-    // Tooltip
+    // ========= Apply checkbox states to OL layers =========
+    function applyLayerVisibilityFromCheckboxes() {
+        // masters
+        dxccLayer.setVisible(isChecked('layerDxcc'));
+        linksGroupLayer.setVisible(isChecked('layerLinks'));
+        modeGroupLayer.setVisible(isChecked('layerQso'));
+
+        // Spojnice children
+        linksCwLayer.setVisible(isChecked('layerLinksCw'));
+        linksSsbLayer.setVisible(isChecked('layerLinksSsb'));
+        linksOtherLayer.setVisible(isChecked('layerLinksOther'));
+
+        linksDigiGroupLayer.setVisible(isChecked('layerLinksDigi'));
+        linksDigiFt8Layer.setVisible(isChecked('layerLinksDigiFt8'));
+        linksDigiFt4Layer.setVisible(isChecked('layerLinksDigiFt4'));
+        linksDigiJt65Layer.setVisible(isChecked('layerLinksDigiJt65'));
+        linksDigiRttyLayer.setVisible(isChecked('layerLinksDigiRtty'));
+        linksDigiPsk31Layer.setVisible(isChecked('layerLinksDigiPsk31'));
+        linksDigiPsk63Layer.setVisible(isChecked('layerLinksDigiPsk63'));
+        linksDigiPsk125Layer.setVisible(isChecked('layerLinksDigiPsk125'));
+        linksDigiSstvLayer.setVisible(isChecked('layerLinksDigiSstv'));
+
+        // Mode children (pro filtr bodů)
+        modeCwLayer.setVisible(isChecked('layerQsoCw'));
+        modeSsbLayer.setVisible(isChecked('layerQsoSsb'));
+        modeOtherLayer.setVisible(isChecked('layerQsoOther'));
+
+        modeDigiGroupLayer.setVisible(isChecked('layerQsoDigi'));
+        modeDigiFt8Layer.setVisible(isChecked('layerQsoDigiFt8'));
+        modeDigiFt4Layer.setVisible(isChecked('layerQsoDigiFt4'));
+        modeDigiJt65Layer.setVisible(isChecked('layerQsoDigiJt65'));
+        modeDigiRttyLayer.setVisible(isChecked('layerQsoDigiRtty'));
+        modeDigiPsk31Layer.setVisible(isChecked('layerQsoDigiPsk31'));
+        modeDigiPsk63Layer.setVisible(isChecked('layerQsoDigiPsk63'));
+        modeDigiPsk125Layer.setVisible(isChecked('layerQsoDigiPsk125'));
+        modeDigiSstvLayer.setVisible(isChecked('layerQsoDigiSstv'));
+    }
+
+    // ========= Worked DXCC sets =========
+    function isDxccEnabledForMode(bucket, sub) {
+        if (!isChecked('layerDxcc')) return false;
+
+        if (bucket === 'CW') return isChecked('layerDxccCw');
+        if (bucket === 'SSB') return isChecked('layerDxccSsb');
+        if (bucket === 'OTHER') return isChecked('layerDxccOther');
+
+        if (bucket === 'DIGI') {
+            if (!isChecked('layerDxccDigi')) return false;
+            if (!sub) return true;
+
+            const s = String(sub).toUpperCase();
+            if (s === 'FT8') return isChecked('layerDxccDigiFt8');
+            if (s === 'FT4') return isChecked('layerDxccDigiFt4');
+            if (s === 'JT65') return isChecked('layerDxccDigiJt65');
+            if (s === 'RTTY') return isChecked('layerDxccDigiRtty');
+            if (s === 'PSK31') return isChecked('layerDxccDigiPsk31');
+            if (s === 'PSK63') return isChecked('layerDxccDigiPsk63');
+            if (s === 'PSK125') return isChecked('layerDxccDigiPsk125');
+            if (s === 'SSTV') return isChecked('layerDxccDigiSstv');
+            return true;
+        }
+
+        return false;
+    }
+
+    function rebuildWorkedDxccSetsFromVisibleQsos() {
+        clearWorkedDxccSets();
+
+        for (const f of targetsSource.getFeatures()) {
+            const qso = f.get('qso');
+            if (!qso) continue;
+
+            const mi = detectFeatureModeInfo(f);
+            if (!isModeVisible(mi.bucket, mi.sub)) continue;
+
+            const code = Number(f.get('dxccEntityCode'));
+            if (!Number.isFinite(code)) continue;
+
+            if (!isDxccEnabledForMode(mi.bucket, mi.sub)) continue;
+
+            if (mi.bucket === 'CW') workedDxcc.cw.add(code);
+            else if (mi.bucket === 'SSB') workedDxcc.ssb.add(code);
+            else if (mi.bucket === 'OTHER') workedDxcc.other.add(code);
+            else if (mi.bucket === 'DIGI') {
+                const k = String(mi.sub || '').toLowerCase();
+                if (workedDxcc.digi[k]) workedDxcc.digi[k].add(code);
+            }
+        }
+    }
+
+    // ========= Tooltip =========
     const tooltipEl = document.createElement('div');
     tooltipEl.className = 'qrb-tooltip';
     tooltipEl.style.display = 'none';
@@ -592,13 +952,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         if (!qso) {
             const lines = [];
             lines.push(`<div class="title">${escapeHtml(locator || '')}</div>`);
-
             if (dxccEntityCode && dxccName) {
-                lines.push(
-                    `<div class="line"><span class="key">DXCC</span><span class="val">${escapeHtml(String(dxccEntityCode))} — ${escapeHtml(dxccName)}</span></div>`
-                );
+                lines.push(`<div class="line"><span class="key">DXCC</span><span class="val">${escapeHtml(String(dxccEntityCode))} — ${escapeHtml(dxccName)}</span></div>`);
             }
-
             tooltipEl.innerHTML = lines.join('');
             return;
         }
@@ -608,14 +964,11 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         lines.push(`<div class="title">${escapeHtml(title)}</div>`);
 
         if (dxccEntityCode && dxccName) {
-            lines.push(
-                `<div class="line"><span class="key">DXCC</span><span class="val">${escapeHtml(String(dxccEntityCode))} — ${escapeHtml(dxccName)}</span></div>`
-            );
+            lines.push(`<div class="line"><span class="key">DXCC</span><span class="val">${escapeHtml(String(dxccEntityCode))} — ${escapeHtml(dxccName)}</span></div>`);
         }
 
         const dt = [fmt(qso.date), fmt(qso.time)].filter(Boolean).join(' ');
         if (dt) lines.push(`<div class="line"><span class="key">Date/Time</span><span class="val">${escapeHtml(dt)}</span></div>`);
-
         if (fmt(qso.mode)) lines.push(`<div class="line"><span class="key">Mode</span><span class="val">${escapeHtml(qso.mode)}</span></div>`);
 
         const sentStr = formatExchange(qso.sentReport, qso.sentContestCode, qso.myLocator);
@@ -651,6 +1004,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         }
     }
 
+    // ========= QTH/Targets helpers =========
     function isValidTargetLocator6(loc) {
         return /^[A-R]{2}[0-9]{2}[A-X]{2}$/.test(loc);
     }
@@ -680,19 +1034,26 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             label: `QTH ${locator6}`
         }));
         if (ui.qthInput) ui.qthInput.value = locator6;
+
+        saveSettings({ qthLocator: locator6 });
         return locator6;
     }
 
     function setQthFromLocator(locator) {
         const ext = locatorToExtentWGS84(locator);
         if (!ext) return false;
+
         const lon = (ext[0] + ext[2]) / 2;
         const lat = (ext[1] + ext[3]) / 2;
+        const locTrim = String(locator).trim().toUpperCase();
+
         qthSource.clear(true);
         qthSource.addFeature(new ol.Feature({
             geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
-            label: `QTH ${String(locator).trim()}`
+            label: `QTH ${locTrim}`
         }));
+
+        saveSettings({ qthLocator: locTrim });
         return true;
     }
 
@@ -726,11 +1087,11 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         else if (submode === 'PSK63') linksDigiPsk63Source.addFeature(lineFeature);
         else if (submode === 'PSK125') linksDigiPsk125Source.addFeature(lineFeature);
         else if (submode === 'SSTV') linksDigiSstvSource.addFeature(lineFeature);
+        else linksOtherSource.addFeature(lineFeature);
     }
 
     function refreshTargetLinks() {
         clearAllLinkSources();
-
         if (!linksGroupLayer.getVisible()) return;
 
         const origin3857 = getLinksOrigin3857OrNull();
@@ -834,6 +1195,8 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         }
     }
 
+    let importedByLocator = new Map();
+
     function plotTargetsFromTextarea() {
         const locs = parseTargetsText(ui.targetsTextarea?.value);
         const valid = [];
@@ -881,14 +1244,16 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 dxccName: dxcc?.name ?? null
             }));
 
-            listItems.push({ loc, display, km });
+            listItems.push({ display, km });
         }
 
         renderLocatorList(listItems);
 
         refreshTargetLinks();
         targetsSource.changed();
-        rebuildWorkedDxccSetFromVisibleQsos();
+
+        rebuildWorkedDxccSetsFromVisibleQsos();
+        dxccGeomSource.changed();
 
         if (ui.statusEl) {
             if (invalid.length) {
@@ -899,41 +1264,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 ui.statusEl.textContent = t().msgShownLocs(valid.length, Boolean(qthLL));
             }
         }
-
-        if (valid.length) {
-            const ext = targetsSource.getExtent();
-            if (ext && ext.every(Number.isFinite)) {
-                view.fit(ext, { padding: [80, 80, 80, 80], duration: 350, maxZoom: 12 });
-            }
-        }
-
-        positionLayersPanel();
-    }
-
-    function rebuildWorkedDxccSetFromVisibleQsos() {
-        workedDxccEntityCodes.clear();
-
-        for (const f of targetsSource.getFeatures()) {
-            const qso = f.get('qso');
-            if (!qso) continue;
-
-            const mi = detectFeatureModeInfo(f);
-            if (!isModeVisible(mi.bucket, mi.sub)) continue;
-
-            const code = Number(f.get('dxccEntityCode'));
-            if (Number.isFinite(code)) workedDxccEntityCodes.add(code);
-        }
-
-        dxccGeomSource.changed();
-    }
-
-    function refreshTargetsDistancesIfAny() {
-        if (!targetsSource.getFeatures().length) {
-            refreshTargetLinks();
-            rebuildWorkedDxccSetFromVisibleQsos();
-            return;
-        }
-        plotTargetsFromTextarea();
     }
 
     function highlightLocator(locator) {
@@ -959,7 +1289,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         return true;
     }
 
-    // Context menu
+    // ========= Context menu =========
     let lastContextLonLat = null;
 
     function hideContextMenu() {
@@ -995,7 +1325,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     map.getViewport().addEventListener('contextmenu', onMapContextMenu);
-
     const mapEl2 = document.getElementById('map');
     if (mapEl2) mapEl2.addEventListener('contextmenu', onMapContextMenu);
 
@@ -1009,352 +1338,10 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         if (e.key === 'Escape') hideContextMenu();
     });
 
-    // Events
+    // ========= Events =========
     if (ui.langSelect) ui.langSelect.addEventListener('change', () => setLanguage(ui.langSelect.value));
     if (ui.modeSelect) ui.modeSelect.addEventListener('change', refreshGrid);
     if (ui.gridToggle) ui.gridToggle.addEventListener('change', refreshGrid);
-
-    // Panel vrstev
-    if (ui.layerMapCheckbox) {
-        ui.layerMapCheckbox.checked = true;
-        ui.layerMapCheckbox.disabled = true;
-    }
-
-    if (ui.layerDxccCheckbox) {
-        ui.layerDxccCheckbox.checked = dxccLayer.getVisible();
-        ui.layerDxccCheckbox.addEventListener('change', async () => {
-            const wantVisible = Boolean(ui.layerDxccCheckbox.checked);
-            if (wantVisible) await ensureDxccGeometryLoaded();
-            dxccLayer.setVisible(wantVisible);
-        });
-    }
-
-    // ===== SPOJNICE: UI (CW/SSB/DIGI/OTHER + DIGI sub) =====
-    function setLinksDigiChildrenVisible(vis) {
-        linksDigiFt8Layer.setVisible(vis);
-        linksDigiFt4Layer.setVisible(vis);
-        linksDigiJt65Layer.setVisible(vis);
-        linksDigiRttyLayer.setVisible(vis);
-        linksDigiPsk31Layer.setVisible(vis);
-        linksDigiPsk63Layer.setVisible(vis);
-        linksDigiPsk125Layer.setVisible(vis);
-        linksDigiSstvLayer.setVisible(vis);
-        linksDigiGroupLayer.setVisible(vis);
-    }
-
-    function setLinksDigiCheckboxStateFromLayers() {
-        const childs = [
-            { cb: ui.layerLinksDigiFt8Checkbox, layer: linksDigiFt8Layer },
-            { cb: ui.layerLinksDigiFt4Checkbox, layer: linksDigiFt4Layer },
-            { cb: ui.layerLinksDigiJt65Checkbox, layer: linksDigiJt65Layer },
-            { cb: ui.layerLinksDigiRttyCheckbox, layer: linksDigiRttyLayer },
-            { cb: ui.layerLinksDigiPsk31Checkbox, layer: linksDigiPsk31Layer },
-            { cb: ui.layerLinksDigiPsk63Checkbox, layer: linksDigiPsk63Layer },
-            { cb: ui.layerLinksDigiPsk125Checkbox, layer: linksDigiPsk125Layer },
-            { cb: ui.layerLinksDigiSstvCheckbox, layer: linksDigiSstvLayer }
-        ].filter(x => x.cb && x.layer);
-
-        for (const x of childs) x.cb.checked = x.layer.getVisible();
-
-        if (ui.layerLinksDigiCheckbox) {
-            const anyOn = childs.some(x => x.layer.getVisible());
-            const allOn = childs.length ? childs.every(x => x.layer.getVisible()) : false;
-            ui.layerLinksDigiCheckbox.indeterminate = (anyOn && !allOn);
-            ui.layerLinksDigiCheckbox.checked = anyOn;
-        }
-
-        linksDigiGroupLayer.setVisible(
-            linksDigiFt8Layer.getVisible() ||
-            linksDigiFt4Layer.getVisible() ||
-            linksDigiJt65Layer.getVisible() ||
-            linksDigiRttyLayer.getVisible() ||
-            linksDigiPsk31Layer.getVisible() ||
-            linksDigiPsk63Layer.getVisible() ||
-            linksDigiPsk125Layer.getVisible() ||
-            linksDigiSstvLayer.getVisible()
-        );
-    }
-
-    function setLinksCheckboxStateFromLayers() {
-        if (!ui.layerLinksCheckbox || !ui.layerLinksCwCheckbox || !ui.layerLinksSsbCheckbox || !ui.layerLinksOtherCheckbox) return;
-
-        const cw = linksCwLayer.getVisible();
-        const ssb = linksSsbLayer.getVisible();
-        const other = linksOtherLayer.getVisible();
-
-        ui.layerLinksCwCheckbox.checked = cw;
-        ui.layerLinksSsbCheckbox.checked = ssb;
-        ui.layerLinksOtherCheckbox.checked = other;
-
-        setLinksDigiCheckboxStateFromLayers();
-        const digiAny = Boolean(ui.layerLinksDigiCheckbox?.checked);
-
-        const anyOn = (cw || ssb || digiAny || other);
-        const allOn = (cw && ssb && digiAny && other);
-
-        ui.layerLinksCheckbox.indeterminate = (anyOn && !allOn);
-        ui.layerLinksCheckbox.checked = anyOn;
-    }
-
-    function setLinksChildrenVisible(vis) {
-        linksCwLayer.setVisible(vis);
-        linksSsbLayer.setVisible(vis);
-        linksOtherLayer.setVisible(vis);
-
-        setLinksDigiChildrenVisible(vis);
-
-        linksGroupLayer.setVisible(vis);
-
-        setLinksCheckboxStateFromLayers();
-        refreshTargetLinks();
-    }
-
-    if (ui.layerLinksCheckbox) {
-        setLinksCheckboxStateFromLayers();
-
-        ui.layerLinksCheckbox.addEventListener('change', () => {
-            const on = Boolean(ui.layerLinksCheckbox.checked);
-            setLinksChildrenVisible(on);
-        });
-
-        if (ui.layerLinksCwCheckbox) {
-            ui.layerLinksCwCheckbox.addEventListener('change', () => {
-                linksCwLayer.setVisible(Boolean(ui.layerLinksCwCheckbox.checked));
-                linksGroupLayer.setVisible(
-                    linksCwLayer.getVisible() ||
-                    linksSsbLayer.getVisible() ||
-                    linksDigiGroupLayer.getVisible() ||
-                    linksOtherLayer.getVisible()
-                );
-                setLinksCheckboxStateFromLayers();
-                refreshTargetLinks();
-            });
-        }
-
-        if (ui.layerLinksSsbCheckbox) {
-            ui.layerLinksSsbCheckbox.addEventListener('change', () => {
-                linksSsbLayer.setVisible(Boolean(ui.layerLinksSsbCheckbox.checked));
-                linksGroupLayer.setVisible(
-                    linksCwLayer.getVisible() ||
-                    linksSsbLayer.getVisible() ||
-                    linksDigiGroupLayer.getVisible() ||
-                    linksOtherLayer.getVisible()
-                );
-                setLinksCheckboxStateFromLayers();
-                refreshTargetLinks();
-            });
-        }
-
-        if (ui.layerLinksOtherCheckbox) {
-            ui.layerLinksOtherCheckbox.addEventListener('change', () => {
-                linksOtherLayer.setVisible(Boolean(ui.layerLinksOtherCheckbox.checked));
-                linksGroupLayer.setVisible(
-                    linksCwLayer.getVisible() ||
-                    linksSsbLayer.getVisible() ||
-                    linksDigiGroupLayer.getVisible() ||
-                    linksOtherLayer.getVisible()
-                );
-                setLinksCheckboxStateFromLayers();
-                refreshTargetLinks();
-            });
-        }
-
-        // DIGI master + sub
-        if (ui.layerLinksDigiCheckbox) {
-            ui.layerLinksDigiCheckbox.addEventListener('change', () => {
-                const on = Boolean(ui.layerLinksDigiCheckbox.checked);
-                setLinksDigiChildrenVisible(on);
-                setLinksCheckboxStateFromLayers();
-                linksGroupLayer.setVisible(
-                    linksCwLayer.getVisible() ||
-                    linksSsbLayer.getVisible() ||
-                    linksDigiGroupLayer.getVisible() ||
-                    linksOtherLayer.getVisible()
-                );
-                refreshTargetLinks();
-            });
-        }
-
-        const digiSubLinks = [
-            { cb: ui.layerLinksDigiFt8Checkbox, layer: linksDigiFt8Layer },
-            { cb: ui.layerLinksDigiFt4Checkbox, layer: linksDigiFt4Layer },
-            { cb: ui.layerLinksDigiJt65Checkbox, layer: linksDigiJt65Layer },
-            { cb: ui.layerLinksDigiRttyCheckbox, layer: linksDigiRttyLayer },
-            { cb: ui.layerLinksDigiPsk31Checkbox, layer: linksDigiPsk31Layer },
-            { cb: ui.layerLinksDigiPsk63Checkbox, layer: linksDigiPsk63Layer },
-            { cb: ui.layerLinksDigiPsk125Checkbox, layer: linksDigiPsk125Layer },
-            { cb: ui.layerLinksDigiSstvCheckbox, layer: linksDigiSstvLayer }
-        ];
-        for (const x of digiSubLinks) {
-            if (!x.cb) continue;
-            x.cb.addEventListener('change', () => {
-                x.layer.setVisible(Boolean(x.cb.checked));
-                setLinksCheckboxStateFromLayers();
-                linksGroupLayer.setVisible(
-                    linksCwLayer.getVisible() ||
-                    linksSsbLayer.getVisible() ||
-                    linksDigiGroupLayer.getVisible() ||
-                    linksOtherLayer.getVisible()
-                );
-                refreshTargetLinks();
-            });
-        }
-    }
-
-    // ===== MODE: UI (CW/SSB/DIGI/OTHER + DIGI sub) =====
-    function setModeDigiChildrenVisible(vis) {
-        modeDigiFt8Layer.setVisible(vis);
-        modeDigiFt4Layer.setVisible(vis);
-        modeDigiJt65Layer.setVisible(vis);
-        modeDigiRttyLayer.setVisible(vis);
-        modeDigiPsk31Layer.setVisible(vis);
-        modeDigiPsk63Layer.setVisible(vis);
-        modeDigiPsk125Layer.setVisible(vis);
-        modeDigiSstvLayer.setVisible(vis);
-        modeDigiGroupLayer.setVisible(vis);
-    }
-
-    function setModeDigiCheckboxStateFromLayers() {
-        const childs = [
-            { cb: ui.layerQsoDigiFt8Checkbox, layer: modeDigiFt8Layer },
-            { cb: ui.layerQsoDigiFt4Checkbox, layer: modeDigiFt4Layer },
-            { cb: ui.layerQsoDigiJt65Checkbox, layer: modeDigiJt65Layer },
-            { cb: ui.layerQsoDigiRttyCheckbox, layer: modeDigiRttyLayer },
-            { cb: ui.layerQsoDigiPsk31Checkbox, layer: modeDigiPsk31Layer },
-            { cb: ui.layerQsoDigiPsk63Checkbox, layer: modeDigiPsk63Layer },
-            { cb: ui.layerQsoDigiPsk125Checkbox, layer: modeDigiPsk125Layer },
-            { cb: ui.layerQsoDigiSstvCheckbox, layer: modeDigiSstvLayer }
-        ].filter(x => x.cb && x.layer);
-
-        for (const x of childs) x.cb.checked = x.layer.getVisible();
-
-        if (ui.layerQsoDigiCheckbox) {
-            const anyOn = childs.some(x => x.layer.getVisible());
-            const allOn = childs.length ? childs.every(x => x.layer.getVisible()) : false;
-            ui.layerQsoDigiCheckbox.indeterminate = (anyOn && !allOn);
-            ui.layerQsoDigiCheckbox.checked = anyOn;
-        }
-
-        modeDigiGroupLayer.setVisible(
-            modeDigiFt8Layer.getVisible() ||
-            modeDigiFt4Layer.getVisible() ||
-            modeDigiJt65Layer.getVisible() ||
-            modeDigiRttyLayer.getVisible() ||
-            modeDigiPsk31Layer.getVisible() ||
-            modeDigiPsk63Layer.getVisible() ||
-            modeDigiPsk125Layer.getVisible() ||
-            modeDigiSstvLayer.getVisible()
-        );
-    }
-
-    function setModeCheckboxStateFromLayers() {
-        if (!ui.layerQsoCheckbox || !ui.layerQsoCwCheckbox || !ui.layerQsoSsbCheckbox || !ui.layerQsoOtherCheckbox) return;
-
-        const cw = modeCwLayer.getVisible();
-        const ssb = modeSsbLayer.getVisible();
-        const other = modeOtherLayer.getVisible();
-
-        ui.layerQsoCwCheckbox.checked = cw;
-        ui.layerQsoSsbCheckbox.checked = ssb;
-        ui.layerQsoOtherCheckbox.checked = other;
-
-        setModeDigiCheckboxStateFromLayers();
-        const digiAny = Boolean(ui.layerQsoDigiCheckbox?.checked);
-
-        const anyOn = (cw || ssb || digiAny || other);
-        const allOn = (cw && ssb && digiAny && other);
-
-        ui.layerQsoCheckbox.indeterminate = (anyOn && !allOn);
-        ui.layerQsoCheckbox.checked = anyOn;
-    }
-
-    function setModeChildrenVisible(vis) {
-        modeCwLayer.setVisible(vis);
-        modeSsbLayer.setVisible(vis);
-        modeOtherLayer.setVisible(vis);
-
-        setModeDigiChildrenVisible(vis);
-
-        setModeCheckboxStateFromLayers();
-        targetsSource.changed();
-        rebuildWorkedDxccSetFromVisibleQsos();
-    }
-
-    if (ui.layerQsoCheckbox) {
-        setModeCheckboxStateFromLayers();
-
-        ui.layerQsoCheckbox.addEventListener('change', () => {
-            const on = Boolean(ui.layerQsoCheckbox.checked);
-            setModeChildrenVisible(on);
-        });
-
-        if (ui.layerQsoCwCheckbox) {
-            ui.layerQsoCwCheckbox.addEventListener('change', () => {
-                modeCwLayer.setVisible(Boolean(ui.layerQsoCwCheckbox.checked));
-                setModeCheckboxStateFromLayers();
-                targetsSource.changed();
-                rebuildWorkedDxccSetFromVisibleQsos();
-            });
-        }
-
-        if (ui.layerQsoSsbCheckbox) {
-            ui.layerQsoSsbCheckbox.addEventListener('change', () => {
-                modeSsbLayer.setVisible(Boolean(ui.layerQsoSsbCheckbox.checked));
-                setModeCheckboxStateFromLayers();
-                targetsSource.changed();
-                rebuildWorkedDxccSetFromVisibleQsos();
-            });
-        }
-
-        if (ui.layerQsoOtherCheckbox) {
-            ui.layerQsoOtherCheckbox.addEventListener('change', () => {
-                modeOtherLayer.setVisible(Boolean(ui.layerQsoOtherCheckbox.checked));
-                setModeCheckboxStateFromLayers();
-                targetsSource.changed();
-                rebuildWorkedDxccSetFromVisibleQsos();
-            });
-        }
-
-        if (ui.layerQsoDigiCheckbox) {
-            ui.layerQsoDigiCheckbox.addEventListener('change', () => {
-                const on = Boolean(ui.layerQsoDigiCheckbox.checked);
-                setModeDigiChildrenVisible(on);
-                setModeCheckboxStateFromLayers();
-                targetsSource.changed();
-                rebuildWorkedDxccSetFromVisibleQsos();
-            });
-        }
-
-        const digiSubMode = [
-            { cb: ui.layerQsoDigiFt8Checkbox, layer: modeDigiFt8Layer },
-            { cb: ui.layerQsoDigiFt4Checkbox, layer: modeDigiFt4Layer },
-            { cb: ui.layerQsoDigiJt65Checkbox, layer: modeDigiJt65Layer },
-            { cb: ui.layerQsoDigiRttyCheckbox, layer: modeDigiRttyLayer },
-            { cb: ui.layerQsoDigiPsk31Checkbox, layer: modeDigiPsk31Layer },
-            { cb: ui.layerQsoDigiPsk63Checkbox, layer: modeDigiPsk63Layer },
-            { cb: ui.layerQsoDigiPsk125Checkbox, layer: modeDigiPsk125Layer },
-            { cb: ui.layerQsoDigiSstvCheckbox, layer: modeDigiSstvLayer }
-        ];
-        for (const x of digiSubMode) {
-            if (!x.cb) continue;
-            x.cb.addEventListener('change', () => {
-                x.layer.setVisible(Boolean(x.cb.checked));
-                setModeCheckboxStateFromLayers();
-                targetsSource.changed();
-                rebuildWorkedDxccSetFromVisibleQsos();
-            });
-        }
-    }
-
-    window.addEventListener('resize', () => {
-        positionLayersPanel();
-    });
-
-    let gridTimer = null;
-    map.on('moveend', () => {
-        clearTimeout(gridTimer);
-        gridTimer = setTimeout(refreshGrid, 120);
-    });
 
     if (ui.goLocatorBtn) {
         ui.goLocatorBtn.addEventListener('click', () => {
@@ -1387,10 +1374,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 if (ui.statusEl) ui.statusEl.textContent = t().msgBadQth;
                 return;
             }
-            refreshTargetsDistancesIfAny();
+            plotTargetsFromTextarea();
             refreshGrid();
             refreshTargetLinks();
-            positionLayersPanel();
         });
     }
 
@@ -1401,10 +1387,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 if (ui.statusEl) ui.statusEl.textContent = t().msgBadQth;
                 return;
             }
-            refreshTargetsDistancesIfAny();
+            plotTargetsFromTextarea();
             refreshGrid();
             refreshTargetLinks();
-            positionLayersPanel();
         });
     }
 
@@ -1412,21 +1397,40 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         ui.clearQthBtn.addEventListener('click', () => {
             if (ui.qthInput) ui.qthInput.value = '';
             qthSource.clear(true);
-            refreshTargetsDistancesIfAny();
+            saveSettings({ qthLocator: null });
+            plotTargetsFromTextarea();
             refreshGrid();
             refreshTargetLinks();
-            positionLayersPanel();
+        });
+    }
+
+    if (ui.ctxAddQthBtn) {
+        ui.ctxAddQthBtn.addEventListener('click', () => {
+            if (!lastContextLonLat) return;
+            const [lon, lat] = lastContextLonLat;
+            const locator6 = setQthFromLonLat(lon, lat);
+
+            hideContextMenu();
+            plotTargetsFromTextarea();
+            refreshGrid();
+            refreshTargetLinks();
+
+            if (ui.statusEl) ui.statusEl.textContent = t().msgQthFromMap(locator6, lon.toFixed(5), lat.toFixed(5));
+        });
+    }
+
+    if (ui.ctxExportPngBtn) {
+        ui.ctxExportPngBtn.addEventListener('click', () => {
+            exportMapAsPng({ map, hideContextMenu });
         });
     }
 
     if (ui.plotTargetsBtn) {
         ui.plotTargetsBtn.addEventListener('click', async () => {
-            targetsMode = 'LOC';
             await ensureDxccLoaded();
             await ensureDxccGeometryLoaded();
             plotTargetsFromTextarea();
             refreshGrid();
-            positionLayersPanel();
         });
     }
 
@@ -1436,15 +1440,12 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             targetsSource.clear(true);
             if (ui.locatorListEl) ui.locatorListEl.innerHTML = '';
             importedByLocator = new Map();
-            targetsMode = 'LOC';
             hideTooltip();
             refreshGrid();
 
-            workedDxccEntityCodes.clear();
-            dxccGeomSource.changed();
-
             clearAllLinkSources();
-            positionLayersPanel();
+            clearWorkedDxccSets();
+            dxccGeomSource.changed();
         });
     }
 
@@ -1469,19 +1470,14 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
                     if (!rows.length) {
                         if (ui.statusEl) ui.statusEl.textContent = 'V ADI/ADIF jsem nenašel žádné záznamy se značkou (CALL).';
-                        positionLayersPanel();
                         return;
                     }
 
                     const qthLL = getQthLonLatOrNull();
                     if (!qthLL) {
                         if (ui.statusEl) ui.statusEl.textContent = 'Nejdřív nastav Moje QTH.';
-                        positionLayersPanel();
                         return;
                     }
-
-                    targetsMode = 'ADIF';
-                    importedByLocator = new Map();
 
                     const byEntity = new Map();
                     let unknownDxcc = 0;
@@ -1521,7 +1517,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
                     if (!byEntity.size) {
                         if (ui.statusEl) ui.statusEl.textContent = 'Z ADI/ADIF se nepodařilo určit žádné DXCC (prefixy).';
-                        positionLayersPanel();
                         return;
                     }
 
@@ -1541,7 +1536,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                             ? haversineKm(originLL[0], originLL[1], ll[0], ll[1])
                             : null;
 
-                        // reprezentativní mode pro "bod"
                         let repMode = 'OTHER';
                         let repSub = null;
 
@@ -1575,7 +1569,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
                     refreshTargetLinks();
                     targetsSource.changed();
-                    rebuildWorkedDxccSetFromVisibleQsos();
+
+                    rebuildWorkedDxccSetsFromVisibleQsos();
+                    dxccGeomSource.changed();
 
                     if (ui.statusEl) {
                         ui.statusEl.textContent = `ADIF načten: DXCC cílů ${byEntity.size}` + (unknownDxcc ? ` | Neznámé DXCC: ${unknownDxcc}` : '');
@@ -1586,7 +1582,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                         view.fit(ext, { padding: [80, 80, 80, 80], duration: 350, maxZoom: 4 });
                     }
 
-                    positionLayersPanel();
                     return;
                 }
 
@@ -1605,15 +1600,12 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                     targetsSource.clear(true);
                     if (ui.locatorListEl) ui.locatorListEl.innerHTML = '';
                     importedByLocator = new Map();
-                    targetsMode = 'LOC';
                     hideTooltip();
                     refreshGrid();
 
-                    workedDxccEntityCodes.clear();
-                    dxccGeomSource.changed();
-
                     clearAllLinkSources();
-                    positionLayersPanel();
+                    clearWorkedDxccSets();
+                    dxccGeomSource.changed();
                     return;
                 }
 
@@ -1623,42 +1615,17 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
                 if (ui.targetsTextarea) ui.targetsTextarea.value = parsed.targets.map(x => x.locator).join('\n');
 
-                targetsMode = 'LOC';
                 plotTargetsFromTextarea();
                 refreshGrid();
 
                 if (ui.statusEl) ui.statusEl.textContent = t().msgEdiLoaded(parsed.targets.length, parsed.myLocator);
-
-                positionLayersPanel();
             } catch (err) {
                 if (ui.statusEl) ui.statusEl.textContent = `Import failed: ${err && err.message ? err.message : String(err)}`;
-                positionLayersPanel();
             }
         });
     }
 
-    if (ui.ctxAddQthBtn) {
-        ui.ctxAddQthBtn.addEventListener('click', () => {
-            if (!lastContextLonLat) return;
-            const [lon, lat] = lastContextLonLat;
-            const locator6 = setQthFromLonLat(lon, lat);
-
-            hideContextMenu();
-            refreshTargetsDistancesIfAny();
-            refreshGrid();
-            refreshTargetLinks();
-
-            if (ui.statusEl) ui.statusEl.textContent = t().msgQthFromMap(locator6, lon.toFixed(5), lat.toFixed(5));
-            positionLayersPanel();
-        });
-    }
-
-    if (ui.ctxExportPngBtn) {
-        ui.ctxExportPngBtn.addEventListener('click', () => {
-            exportMapAsPng({ map, hideContextMenu });
-        });
-    }
-
+    // Tooltip hover
     map.on('pointermove', (evt) => {
         if (evt.dragging) {
             clearHoverTimer();
@@ -1704,17 +1671,46 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         hideTooltip();
     });
 
+    // ========= Hook: when tree changes =========
+    function onUiLayersChanged() {
+        applyLayerVisibilityFromCheckboxes();
+        refreshTargetLinks();
+        targetsSource.changed();
+        rebuildWorkedDxccSetsFromVisibleQsos();
+        dxccGeomSource.changed();
+    }
+
     // Initial
+    applyPersistedLayerCheckboxStates();
+
+    bindPersistLayerCheckboxes();
+    bindTreeCheckboxLogic(onUiLayersChanged);
+    bindColorButtons(onUiLayersChanged);
+
+    // after restore: sync tree states and apply
+    if (ui.layersPanelEl) syncWholeTree(ui.layersPanelEl);
+    persistAllLayerCheckboxStates(); // normalize persisted after sync
+
+    // restore QTH
+    {
+        const s0 = ensureSettingsShape(loadSettings());
+        if (s0.qthLocator && ui.qthInput) {
+            ui.qthInput.value = String(s0.qthLocator);
+            setQthFromLocator(s0.qthLocator);
+        }
+    }
+
     setLanguage(currentLang);
     if (ui.panelBodyEl) ui.panelBodyEl.style.display = isPanelCollapsed() ? 'none' : 'block';
-    view.fit(zlinskyExtent3857, { padding: [40, 40, 40, 40] });
+
+    applyLayerVisibilityFromCheckboxes();
 
     ensureDxccLoaded();
-    ensureDxccGeometryLoaded();
+    ensureDxccGeometryLoaded().then(() => {
+        rebuildWorkedDxccSetsFromVisibleQsos();
+        dxccGeomSource.changed();
+    });
 
     refreshGrid();
     refreshTargetLinks();
-    rebuildWorkedDxccSetFromVisibleQsos();
-
-    requestAnimationFrame(() => positionLayersPanel());
 })();
