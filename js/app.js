@@ -10,11 +10,14 @@ import { parseEdiText, importEdiFile } from './edi.js';
 import { parseAdifText, importAdifFile } from './adif.js';
 import { exportMapAsPng } from './exportPng.js';
 import { loadDxccIndex, findDxccByCall } from './dxcc.js';
+import { importCabrilloFile, parseCabrilloText } from './cabrillo.js';
 
 (() => {
     const STORAGE_KEY = 'qrbMapViewer.v1';
 
-    // Google Analytics – jednoduchý wrapper na gtag
+    const log = (...args) => console.log('[APP]', ...args);
+
+    // Google Analytics – jednoduchý wrapper na gtag (ID je řešené v index.html)
     function trackEvent(eventName, params = {}) {
         if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
             window.gtag('event', eventName, params);
@@ -394,6 +397,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         dxccIndexPromise = loadDxccIndex({ url: './dxcc/dxcc.json' })
             .then((idx) => {
                 dxccIndex = idx;
+                log('[DXCC] index loaded');
                 return dxccIndex;
             })
             .catch((err) => {
@@ -453,6 +457,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 dxccGeomSource.addFeatures(features);
 
                 dxccGeomLoaded = true;
+                log('[DXCC] geometry loaded, features:', features.length);
                 return true;
             } catch (err) {
                 console.warn('DXCC geometry load failed:', err);
@@ -494,6 +499,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     // ========= Mode parsing =========
     const DIGI_SUBMODES = Object.freeze(['FT8', 'FT4', 'JT65', 'RTTY', 'PSK31', 'PSK63', 'PSK125', 'SSTV']);
 
+    // map Cabrillo/common codes to submodes
     function normalizeModeStr(modeStr) {
         return String(modeStr ?? '').trim().toUpperCase();
     }
@@ -501,6 +507,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     function detectDigiSubmode(modeStr) {
         const m = normalizeModeStr(modeStr);
         if (!m) return null;
+        if (m === 'RY') return 'RTTY'; // Cabrillo RTTY
+        if (m === 'DG') return null;   // generic digi, no submode
+        if (m === 'PH') return null;   // phone -> not digi
         return DIGI_SUBMODES.includes(m) ? m : null;
     }
 
@@ -508,11 +517,17 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         const m = normalizeModeStr(modeStr);
         if (!m) return 'OTHER';
 
+        // Cabrillo / common mappings
+        if (m === 'CW') return 'CW';
+        if (m === 'PH') return 'SSB'; // phone
+        if (m === 'RY') return 'DIGI'; // RTTY in Cabrillo
+        if (m === 'DG') return 'DIGI'; // generic digital
+
         const digi = detectDigiSubmode(m);
         if (digi) return 'DIGI';
 
-        if (m === 'CW' || m.includes('CW')) return 'CW';
         if (m === 'SSB' || m === 'USB' || m === 'LSB' || m.includes('SSB')) return 'SSB';
+        if (m.includes('CW')) return 'CW';
 
         return 'OTHER';
     }
@@ -1574,6 +1589,8 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         ui.importEdiBtn.addEventListener('click', async () => {
             const file = ui.ediFileInput?.files && ui.ediFileInput.files[0];
 
+            log('IMPORT click', file ? { name: file.name, size: file.size, type: file.type } : null);
+
             // GA – klik na import
             trackEvent('import_log_clicked', {
                 has_file: Boolean(file)
@@ -1586,14 +1603,20 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
             const name = String(file.name || '').toLowerCase();
             const isAdif = name.endsWith('.adi') || name.endsWith('.adif');
+            const isCabrillo = name.endsWith('.log') || name.endsWith('.cbr');
+
+            log('IMPORT detected file type', { name, isAdif, isCabrillo });
 
             try {
                 await ensureDxccLoaded();
                 await ensureDxccGeometryLoaded();
 
                 if (isAdif) {
+                    // ----- ADIF -----
                     const text = await importAdifFile(file);
                     const rows = parseAdifText(text);
+
+                    log('[ADIF] rows parsed:', rows.length);
 
                     if (!rows.length) {
                         if (ui.statusEl) ui.statusEl.textContent = 'V ADI/ADIF jsem nenašel žádné záznamy se značkou (CALL).';
@@ -1718,6 +1741,152 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                     return;
                 }
 
+                if (isCabrillo) {
+                    // ----- CABRILLO -----
+                    log('[CABRILLO] start import');
+                    const text = await importCabrilloFile(file);
+                    log('[CABRILLO] text length', text.length);
+
+                    const parsed = parseCabrilloText(text);
+                    log('[CABRILLO] parsed summary', {
+                        myCall: parsed.myCall,
+                        qsoCount: parsed.qsos?.length ?? 0
+                    });
+
+                    if (!parsed.qsos || !parsed.qsos.length) {
+                        log('[CABRILLO] no QSOs parsed');
+                        if (ui.statusEl) ui.statusEl.textContent = t().msgEdiNoLocs;
+                        if (ui.targetsTextarea) ui.targetsTextarea.value = '';
+                        targetsSource.clear(true);
+                        if (ui.locatorListEl) ui.locatorListEl.innerHTML = '';
+                        importedByLocator = new Map();
+                        hideTooltip();
+                        refreshGrid();
+
+                        clearAllLinkSources();
+                        clearWorkedDxccSets();
+                        dxccGeomSource.changed();
+
+                        trackEvent('import_cabrillo_empty', {});
+                        return;
+                    }
+
+                    const byEntity = new Map();
+                    let unknownDxcc = 0;
+
+                    for (const q of parsed.qsos) {
+                        const call = String(q.call || '').trim().toUpperCase();
+                        if (!call) continue;
+
+                        const dx = findDxccByCall(call, dxccIndex, { includeDeleted: false });
+                        if (!dx?.entityCode) {
+                            unknownDxcc++;
+                            continue;
+                        }
+
+                        const key = Number(dx.entityCode);
+                        if (!Number.isFinite(key)) continue;
+
+                        const bucket = byEntity.get(key) || {
+                            entityCode: key,
+                            dxccName: dx.name || null,
+                            calls: new Set(),
+                            modes: new Set(),
+                            digiSubmodes: new Set()
+                        };
+
+                        bucket.calls.add(call);
+
+                        const b = detectModeBucket(q.mode || '');
+                        bucket.modes.add(b);
+                        if (b === 'DIGI') {
+                            const sub = detectDigiSubmode(q.mode || '');
+                            if (sub) bucket.digiSubmodes.add(sub);
+                        }
+
+                        byEntity.set(key, bucket);
+                    }
+
+                    log('[CABRILLO] byEntity size', byEntity.size, 'unknownDxcc', unknownDxcc);
+
+                    if (!byEntity.size) {
+                        if (ui.statusEl) ui.statusEl.textContent = 'Z Cabrillo se nepodařilo určit žádné DXCC (prefixy).';
+                        trackEvent('import_cabrillo_empty_dxcc', { unknown_dxcc: unknownDxcc });
+                        return;
+                    }
+
+                    targetsSource.clear(true);
+                    if (ui.targetsTextarea) ui.targetsTextarea.value = '';
+
+                    const origin3857 = getLinksOrigin3857OrNull();
+                    const originLL = origin3857 ? ol.proj.toLonLat(origin3857) : null;
+
+                    const listItems = [];
+                    for (const ent of byEntity.values()) {
+                        const center3857 = getDxccCenter3857ByEntityCode(ent.entityCode);
+                        if (!center3857) continue;
+
+                        const ll = ol.proj.toLonLat(center3857);
+                        const km = (originLL && ll)
+                            ? haversineKm(originLL[0], originLL[1], ll[0], ll[1])
+                            : null;
+
+                        let repMode = 'OTHER';
+                        let repSub = null;
+
+                        if (ent.modes.has('CW')) repMode = 'CW';
+                        else if (ent.modes.has('SSB')) repMode = 'SSB';
+                        else if (ent.modes.has('DIGI')) {
+                            repMode = 'DIGI';
+                            repSub = ent.digiSubmodes.values().next().value || 'FT8';
+                        }
+
+                        const labelName = ent.dxccName ? ent.dxccName : `DXCC ${ent.entityCode}`;
+                        const label = `${labelName} (${ent.calls.size})`;
+
+                        targetsSource.addFeature(new ol.Feature({
+                            geometry: new ol.geom.Point(center3857),
+                            label,
+                            locator: null,
+                            call: null,
+                            qso: { mode: (repSub ? repSub : repMode), source: 'CABRILLO' },
+                            qsoMode: repMode,
+                            qsoModeSub: repSub,
+                            km,
+                            dxccEntityCode: ent.entityCode,
+                            dxccName: ent.dxccName
+                        }));
+
+                        listItems.push({ display: labelName, km });
+                    }
+
+                    renderLocatorList(listItems);
+
+                    refreshTargetLinks();
+                    targetsSource.changed();
+
+                    rebuildWorkedDxccSetsFromVisibleQsos();
+                    dxccGeomSource.changed();
+
+                    if (ui.statusEl) {
+                        ui.statusEl.textContent = `Cabrillo načteno: DXCC cílů ${byEntity.size}` +
+                            (unknownDxcc ? ` | Neznámé DXCC: ${unknownDxcc}` : '');
+                    }
+
+                    trackEvent('import_cabrillo_success', {
+                        dxcc_entities: byEntity.size,
+                        unknown_dxcc: unknownDxcc
+                    });
+
+                    const ext = targetsSource.getExtent();
+                    if (ext && ext.every(Number.isFinite)) {
+                        view.fit(ext, { padding: [80, 80, 80, 80], duration: 350, maxZoom: 4 });
+                    }
+
+                    return;
+                }
+
+                // ----- EDI -----
                 const text = await importEdiFile(file);
                 const parsed = parseEdiText(text, isValidTargetLocator6);
 
@@ -1739,7 +1908,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                     clearWorkedDxccSets();
                     dxccGeomSource.changed();
 
-                    // GA – EDI bez lokátorů
                     trackEvent('import_edi_empty', {});
                     return;
                 }
@@ -1755,12 +1923,12 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
                 if (ui.statusEl) ui.statusEl.textContent = t().msgEdiLoaded(parsed.targets.length, parsed.myLocator);
 
-                // GA – úspěšný EDI import
                 trackEvent('import_edi_success', {
                     locator_count: parsed.targets.length,
                     has_my_qth: Boolean(parsed.myLocator)
                 });
             } catch (err) {
+                console.error('[IMPORT] failed', err);
                 if (ui.statusEl) ui.statusEl.textContent = `Import failed: ${err && err.message ? err.message : String(err)}`;
 
                 // GA – chyba při importu

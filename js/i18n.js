@@ -11,7 +11,7 @@ export function createI18n() {
             lblGridMode: 'Mřížka:',
             lblGridToggle: 'Zobrazit mřížku',
 
-            lblEdi: 'Import EDI / ADIF:',
+            lblEdi: 'Načíst deník:',
             lblEdiSetQth: 'Nastavit QTH z EDI',
             importEdi: 'Načíst',
 
@@ -34,7 +34,7 @@ export function createI18n() {
             ctxAddQth: 'Přidej Moje QTH',
             ctxExportPng: 'Export mapy do PNG',
 
-            msgPickEdi: 'Vyber prosím EDI/ADIF soubor.',
+            msgPickEdi: 'Vyber prosím EDI/ADIF/CBR soubor.',
             msgEdiNoLocs: 'V EDI jsem nenašel žádné lokátory protistanic (6 znaků).',
             msgEdiLoaded: (n, my) => `EDI načteno: ${n} lokátorů${my ? ` | QTH: ${my}` : ''}`,
             msgBadLocator: 'Neplatný lokátor. Zadej 2/4/6 znaků (např. JN / JN89 / JN89ab).',
@@ -77,7 +77,7 @@ export function createI18n() {
             lblGridMode: 'Grid:',
             lblGridToggle: 'Show grid',
 
-            lblEdi: 'Import EDI / ADIF:',
+            lblEdi: 'Import log:',
             lblEdiSetQth: 'Set QTH from EDI',
             importEdi: 'Load',
 
@@ -100,7 +100,7 @@ export function createI18n() {
             ctxAddQth: 'Add My QTH',
             ctxExportPng: 'Export map as PNG',
 
-            msgPickEdi: 'Please choose an EDI/ADIF file.',
+            msgPickEdi: 'Please choose an EDI/ADIF/CBR file.',
             msgEdiNoLocs: 'No 6-char remote locators found in EDI.',
             msgEdiLoaded: (n, my) => `EDI loaded: ${n} locators${my ? ` | QTH: ${my}` : ''}`,
             msgBadLocator: 'Invalid locator. Use 2/4/6 chars (e.g. JN / JN89 / JN89ab).',

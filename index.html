@@ -12,9 +12,8 @@
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-9CCJ74WGQM"></script>
     <script>
         window.dataLayer = window.dataLayer || [];
-        function gtag(){dataLayer.push(arguments);}
+        function gtag(){ dataLayer.push(arguments); }
         gtag('js', new Date());
-
         gtag('config', 'G-9CCJ74WGQM');
     </script>
 </head>
@@ -427,9 +426,13 @@
         </div>
 
         <div class="row">
-            <label for="ediFile" id="lblEdi">Import EDI:</label>
-            <input id="ediFile" type="file" accept=".d,.D,.edi,.EDI,.adi,.ADI,.adif,.ADIF,text/plain" />
-            <button id="importEdi" type="button">Načíst</button>
+            <label for="ediFile" id="lblEdi">Nahrát deník:</label>
+            <input
+                    id="ediFile"
+                    type="file"
+                    accept=".d,.D,.edi,.EDI,.adi,.ADI,.adif,.ADIF,.log,.LOG,.cbr,.CBR,text/plain"
+            />
+            <button id="importEdi" type="button">Načíst deník</button>
 
             <label class="inline-check">
                 <span id="lblEdiSetQth">Nastavit QTH z EDI</span>
