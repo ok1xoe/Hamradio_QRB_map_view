@@ -182,7 +182,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         });
     }
 
-    // ========= Tree checkbox logic (parent/children) =========
+    // ========= Tree checkbox logic =========
     let treeSyncLock = false;
 
     function getTreeItemElFromCheckbox(cb) {
@@ -239,7 +239,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             parentCb.indeterminate = true;
         }
     }
-
     function updateAncestors(treeItemEl) {
         let cur = treeItemEl;
         while (cur) {
@@ -253,7 +252,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     function syncWholeTree(panelEl) {
         const allItems = Array.from(panelEl.querySelectorAll('li[role="treeitem"]'));
 
-        // 1) pokud rodič není checked, vynutit vypnutí všech potomků
         for (const it of allItems) {
             const cb = getOwnCheckbox(it);
             if (!cb) continue;
@@ -262,7 +260,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             }
         }
 
-        // 2) dopočítat rodiče odspoda
         for (let i = allItems.length - 1; i >= 0; i--) {
             updateParentFromChildren(allItems[i]);
         }
@@ -283,15 +280,12 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 const item = getTreeItemElFromCheckbox(cb);
                 if (!item) return;
 
-                // toggle subtree
                 setTreeSubtreeChecked(item, cb.checked);
                 cb.indeterminate = false;
 
-                // update parents
                 updateParentFromChildren(item);
                 updateAncestors(item);
 
-                // persist ALL because programmatic updates don't emit change
                 persistAllLayerCheckboxStates();
 
                 if (typeof onTreeChanged === 'function') onTreeChanged();
@@ -519,7 +513,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     const osmLayer = new ol.layer.Tile({ source: new ol.source.OSM() });
     osmLayer.set('name', 'Mapa');
 
-    // pattern fill (multi-mode) for DXCC
     const patternCache = new Map();
     function createStripePatternRgba(rgbaColors) {
         const key = rgbaColors.join('|');
@@ -671,7 +664,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     linksGroupLayer.set('name', 'Spojnice');
     linksGroupLayer.setZIndex(7);
 
-    // Mode visibility layers (only for filtering)
     const modeCwLayer = new ol.layer.Vector({ source: new ol.source.Vector() });
     const modeSsbLayer = new ol.layer.Vector({ source: new ol.source.Vector() });
     const modeOtherLayer = new ol.layer.Vector({ source: new ol.source.Vector() });
@@ -701,27 +693,31 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     });
     modeGroupLayer.setZIndex(8);
 
-    function isDigiSubmodeVisible(sub) {
-        if (!sub) return false;
-        if (sub === 'FT8') return modeDigiFt8Layer.getVisible();
-        if (sub === 'FT4') return modeDigiFt4Layer.getVisible();
-        if (sub === 'JT65') return modeDigiJt65Layer.getVisible();
-        if (sub === 'RTTY') return modeDigiRttyLayer.getVisible();
-        if (sub === 'PSK31') return modeDigiPsk31Layer.getVisible();
-        if (sub === 'PSK63') return modeDigiPsk63Layer.getVisible();
-        if (sub === 'PSK125') return modeDigiPsk125Layer.getVisible();
-        if (sub === 'SSTV') return modeDigiSstvLayer.getVisible();
+    // Přepínání viditelnosti bodů se řídí pouze stavem checkboxů (Mode)
+    function isModeChecked(bucket, sub) {
+        if (!isChecked('layerQso')) return false;
+        if (bucket === 'CW') return isChecked('layerQsoCw');
+        if (bucket === 'SSB') return isChecked('layerQsoSsb');
+        if (bucket === 'OTHER') return isChecked('layerQsoOther');
+        if (bucket === 'DIGI') {
+            if (!isChecked('layerQsoDigi')) return false;
+            if (!sub) return true;
+            const s = String(sub).toUpperCase();
+            if (s === 'FT8') return isChecked('layerQsoDigiFt8');
+            if (s === 'FT4') return isChecked('layerQsoDigiFt4');
+            if (s === 'JT65') return isChecked('layerQsoDigiJt65');
+            if (s === 'RTTY') return isChecked('layerQsoDigiRtty');
+            if (s === 'PSK31') return isChecked('layerQsoDigiPsk31');
+            if (s === 'PSK63') return isChecked('layerQsoDigiPsk63');
+            if (s === 'PSK125') return isChecked('layerQsoDigiPsk125');
+            if (s === 'SSTV') return isChecked('layerQsoDigiSstv');
+            return true;
+        }
         return false;
     }
 
     function isModeVisible(bucket, sub) {
-        if (!modeGroupLayer.getVisible()) return false;
-
-        if (bucket === 'CW') return modeCwLayer.getVisible();
-        if (bucket === 'SSB') return modeSsbLayer.getVisible();
-        if (bucket === 'OTHER') return modeOtherLayer.getVisible();
-        if (bucket === 'DIGI') return modeDigiGroupLayer.getVisible() && isDigiSubmodeVisible(sub);
-        return false;
+        return isModeChecked(bucket, sub);
     }
 
     function pointFillColor(bucket, sub) {
@@ -814,7 +810,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         view
     });
 
-    // mřížka se bude přepočítávat při změně zoomu i po dokončení posunu/zoomu
+    // mřížka se přepočítá při změně zoomu i po dokončení pohybu
     view.on('change:resolution', () => {
         refreshGrid();
     });
@@ -825,12 +821,10 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
     // ========= Apply checkbox states to OL layers =========
     function applyLayerVisibilityFromCheckboxes() {
-        // masters
         dxccLayer.setVisible(isChecked('layerDxcc'));
         linksGroupLayer.setVisible(isChecked('layerLinks'));
         modeGroupLayer.setVisible(isChecked('layerQso'));
 
-        // Spojnice children
         linksCwLayer.setVisible(isChecked('layerLinksCw'));
         linksSsbLayer.setVisible(isChecked('layerLinksSsb'));
         linksOtherLayer.setVisible(isChecked('layerLinksOther'));
@@ -845,7 +839,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         linksDigiPsk125Layer.setVisible(isChecked('layerLinksDigiPsk125'));
         linksDigiSstvLayer.setVisible(isChecked('layerLinksDigiSstv'));
 
-        // Mode children (pro filtr bodů)
         modeCwLayer.setVisible(isChecked('layerQsoCw'));
         modeSsbLayer.setVisible(isChecked('layerQsoSsb'));
         modeOtherLayer.setVisible(isChecked('layerQsoOther'));
@@ -896,11 +889,11 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             if (!qso) continue;
 
             const mi = detectFeatureModeInfo(f);
-            if (!isModeVisible(mi.bucket, mi.sub)) continue;
 
             const code = Number(f.get('dxccEntityCode'));
             if (!Number.isFinite(code)) continue;
 
+            // Nepoužíváme isModeVisible – DXCC barvy zůstávají i když jsou body schované.
             if (!isDxccEnabledForMode(mi.bucket, mi.sub)) continue;
 
             if (mi.bucket === 'CW') workedDxcc.cw.add(code);
@@ -1140,7 +1133,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
         const size = map.getSize();
         if (!size || size[0] <= 0 || size[1] <= 0) {
-            return; // mapa ještě nemá rozměr, mřížku teď nekreslíme
+            return;
         }
 
         const zNum = view.getZoom();
@@ -1599,7 +1592,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                     return;
                 }
 
-                // EDI
                 const text = await importEdiFile(file);
                 const parsed = parseEdiText(text, isValidTargetLocator6);
 
@@ -1685,7 +1677,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         hideTooltip();
     });
 
-    // ========= Hook: when tree changes =========
     function onUiLayersChanged() {
         applyLayerVisibilityFromCheckboxes();
         refreshTargetLinks();
@@ -1694,18 +1685,15 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         dxccGeomSource.changed();
     }
 
-    // Initial
     applyPersistedLayerCheckboxStates();
 
     bindPersistLayerCheckboxes();
     bindTreeCheckboxLogic(onUiLayersChanged);
     bindColorButtons(onUiLayersChanged);
 
-    // after restore: sync tree states and apply
     if (ui.layersPanelEl) syncWholeTree(ui.layersPanelEl);
-    persistAllLayerCheckboxStates(); // normalize persisted after sync
+    persistAllLayerCheckboxStates();
 
-    // restore QTH
     {
         const s0 = ensureSettingsShape(loadSettings());
         if (s0.qthLocator && ui.qthInput) {
