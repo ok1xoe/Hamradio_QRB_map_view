@@ -7,6 +7,16 @@
 
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@latest/ol.css" />
     <link rel="stylesheet" href="./styles.css" />
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-9CCJ74WGQM"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+
+        gtag('config', 'G-9CCJ74WGQM');
+    </script>
 </head>
 <body>
 
@@ -30,6 +40,18 @@
                 </div>
 
                 <ul role="group">
+
+                    <!-- Názvy DXCC (textové štítky) -->
+                    <li role="treeitem">
+                        <div class="node leaf">
+                            <span class="twisty" aria-hidden="true"></span>
+                            <label class="layer-item">
+                                <input id="layerDxccLabels" type="checkbox" checked />
+                                <span id="lblLayerDxccLabels">Názvy DXCC</span>
+                            </label>
+                            <input id="dxccLabelSize" class="dxcc-label-size" type="number" min="8" max="32" step="1" value="12" aria-label="Velikost popisku DXCC" />
+                        </div>
+                    </li>
 
                     <!-- DXCC -->
                     <li role="treeitem" aria-expanded="true">
@@ -379,12 +401,12 @@
     </div>
 
     <div class="panel-body">
-        <div class="row">
-            <label for="lang" id="lblLang">Jazyk:</label>
-            <select id="lang">
-                <option value="cs" selected>CZ</option>
-                <option value="en">EN</option>
-            </select>
+        <div class="row lang-row">
+            <label id="lblLang">Jazyk:</label>
+            <div class="lang-switch" id="langSwitch">
+                <button type="button" class="lang-btn active" data-lang="cs">CZ</button>
+                <button type="button" class="lang-btn" data-lang="en">EN</button>
+            </div>
         </div>
 
         <div class="row">

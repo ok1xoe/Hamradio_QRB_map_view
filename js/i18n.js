@@ -38,7 +38,7 @@ export function createI18n() {
             msgEdiNoLocs: 'V EDI jsem nenašel žádné lokátory protistanic (6 znaků).',
             msgEdiLoaded: (n, my) => `EDI načteno: ${n} lokátorů${my ? ` | QTH: ${my}` : ''}`,
             msgBadLocator: 'Neplatný lokátor. Zadej 2/4/6 znaků (např. JN / JN89 / JN89ab).',
-            msgBadQth: 'Neplatné QTH. Zadej lokátor ve formátu 2/4/6 znaků (např. JN89ab).',
+            msgBadQth: 'Neplatné QTH. Zadej lokátor ve formátu 2/4/6 (např. JN89ab).',
             msgGridOff: (z) => `Zoom: ${z} | Mřížka: VYPNUTO`,
             msgGridOn: (z, lvl, n) => `Zoom: ${z} | ${lvl} | Buněk: ${n}`,
             msgInvalidLines: (s) => `Neplatné řádky (ignorováno): ${s}`,
@@ -49,6 +49,7 @@ export function createI18n() {
             lblLayersTitle: 'Vrstvy',
             layerMap: 'Mapa',
             layerDxcc: 'DXCC',
+            layerDxccLabels: 'Názvy DXCC',
             layerLinks: 'Spojnice',
             layerMode: 'Mode',
 
@@ -114,6 +115,7 @@ export function createI18n() {
             lblLayersTitle: 'Layers',
             layerMap: 'Map',
             layerDxcc: 'DXCC',
+            layerDxccLabels: 'DXCC Names',
             layerLinks: 'Links',
             layerMode: 'Mode',
 
@@ -167,6 +169,7 @@ export function applyTranslations({ lang, dict, ui, isPanelCollapsed }) {
     setText('lblLayersTitle', t.lblLayersTitle);
     setText('lblLayerMap', t.layerMap);
     setText('lblLayerDxcc', t.layerDxcc);
+    setText('lblLayerDxccLabels', t.layerDxccLabels);
     setText('lblLayerLinks', t.layerLinks);
     setText('lblLayerMode', t.layerMode);
 

@@ -1,4 +1,3 @@
-// js/app.js
 import {
     maidenheadSubsquare,
     locatorToExtentWGS84,
@@ -14,6 +13,13 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
 (() => {
     const STORAGE_KEY = 'qrbMapViewer.v1';
+
+    // Google Analytics – jednoduchý wrapper na gtag
+    function trackEvent(eventName, params = {}) {
+        if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
+            window.gtag('event', eventName, params);
+        }
+    }
 
     function safeJsonParse(s) {
         try { return JSON.parse(s); } catch { return null; }
@@ -36,6 +42,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         const out = (s && typeof s === 'object') ? { ...s } : {};
         if (!out.colors || typeof out.colors !== 'object') out.colors = {};
         if (!out.layerStates || typeof out.layerStates !== 'object') out.layerStates = {};
+        if (!out.dxccLabels || typeof out.dxccLabels !== 'object') {
+            out.dxccLabels = { size: 12 };
+        }
         return out;
     }
 
@@ -105,7 +114,8 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
         langSelect: document.getElementById('lang'),
 
-        layersPanelEl: document.getElementById('layersPanel')
+        layersPanelEl: document.getElementById('layersPanel'),
+        dxccLabelSizeInput: document.getElementById('dxccLabelSize')
     };
 
     // ========= i18n =========
@@ -123,7 +133,21 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     function setLanguage(lang) {
         currentLang = normalizeLang(lang);
         if (ui.langSelect) ui.langSelect.value = currentLang;
+
         applyTranslations({ lang: currentLang, dict, ui, isPanelCollapsed: () => isPanelCollapsed() });
+
+        // synchronizace vzhledu tlačítek CZ / EN
+        const langButtons = document.querySelectorAll('.lang-btn[data-lang]');
+        langButtons.forEach((btn) => {
+            const btnLang = normalizeLang(btn.dataset.lang);
+            btn.classList.toggle('active', btnLang === currentLang);
+        });
+
+        // GA – změna jazyka
+        trackEvent('change_language', {
+            language: currentLang
+        });
+
         refreshGrid();
     }
 
@@ -239,6 +263,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             parentCb.indeterminate = true;
         }
     }
+
     function updateAncestors(treeItemEl) {
         let cur = treeItemEl;
         while (cur) {
@@ -558,6 +583,26 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         return Array.from(new Set(colors));
     }
 
+    // Je entita „worked“ a povolená aktuálními DXCC checkboxy?
+    function isEntityWorked(code) {
+        const c = Number(code);
+        if (!Number.isFinite(c)) return false;
+
+        if (workedDxcc.cw.has(c) && isDxccEnabledForMode('CW')) return true;
+        if (workedDxcc.ssb.has(c) && isDxccEnabledForMode('SSB')) return true;
+        if (workedDxcc.other.has(c) && isDxccEnabledForMode('OTHER')) return true;
+
+        if (isDxccEnabledForMode('DIGI')) {
+            const subs = ['ft8','ft4','jt65','rtty','psk31','psk63','psk125','sstv'];
+            for (const sub of subs) {
+                const subU = sub.toUpperCase();
+                if (!isDxccEnabledForMode('DIGI', subU)) continue;
+                if (workedDxcc.digi[sub].has(c)) return true;
+            }
+        }
+        return false;
+    }
+
     const dxccLayer = new ol.layer.Vector({
         source: dxccGeomSource,
         opacity: 0.95,
@@ -586,6 +631,45 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     });
     dxccLayer.set('name', 'DXCC');
     dxccLayer.setZIndex(5);
+
+    // DXCC text labels layer (jen worked DXCC)
+    const dxccLabelsLayer = new ol.layer.Vector({
+        source: dxccGeomSource,
+        declutter: true,
+        style: (feature) => {
+            const props = feature.getProperties() || {};
+            const code = Number(props.dxcc_entity_code);
+            if (!Number.isFinite(code)) return null;
+
+            if (!isEntityWorked(code)) return null;
+
+            const name = props.dxcc_name || props.name || '';
+            const prefix =
+                props.dxcc_prefix ||
+                props.primary_prefix ||
+                props.prefix ||
+                '';
+            const label = prefix
+                ? `${name} (${prefix})`
+                : (name || (code ? `DXCC ${code}` : ''));
+
+            const size = getDxccLabelSize();
+            const font = 'system-ui, Arial, sans-serif';
+
+            return new ol.style.Style({
+                text: new ol.style.Text({
+                    text: label,
+                    font: `${size}px ${font}`,
+                    fill: new ol.style.Fill({ color: '#0b2a66' }),
+                    stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.85)', width: 3 }),
+                    overflow: true
+                }),
+                geometry: feature.getGeometry()?.getInteriorPoint?.() ?? feature.getGeometry()
+            });
+        }
+    });
+    dxccLabelsLayer.set('name', 'DXCC Labels');
+    dxccLabelsLayer.setZIndex(6);
 
     function linkStrokeColor(bucket, sub) {
         if (bucket === 'CW') return getColor('dxcc.cw');
@@ -693,7 +777,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     });
     modeGroupLayer.setZIndex(8);
 
-    // Přepínání viditelnosti bodů se řídí pouze stavem checkboxů (Mode)
+    // Přepínání viditelnosti bodů podle checkboxů „Mode“
     function isModeChecked(bucket, sub) {
         if (!isChecked('layerQso')) return false;
         if (bucket === 'CW') return isChecked('layerQsoCw');
@@ -759,13 +843,6 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                     radius: 5,
                     fill: new ol.style.Fill({ color: pointFillColor(mi.bucket, mi.sub) }),
                     stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 })
-                }),
-                text: new ol.style.Text({
-                    text: feature.get('label') || '',
-                    offsetY: -14,
-                    font: '12px system-ui, Arial',
-                    fill: new ol.style.Fill({ color: '#0b3b2a' }),
-                    stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.9)', width: 3 })
                 })
             });
         }
@@ -800,6 +877,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         layers: [
             osmLayer,
             dxccLayer,
+            dxccLabelsLayer,
             linksGroupLayer,
             modeGroupLayer,
             gridLayer,
@@ -822,6 +900,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     // ========= Apply checkbox states to OL layers =========
     function applyLayerVisibilityFromCheckboxes() {
         dxccLayer.setVisible(isChecked('layerDxcc'));
+        dxccLabelsLayer.setVisible(isChecked('layerDxccLabels'));
         linksGroupLayer.setVisible(isChecked('layerLinks'));
         modeGroupLayer.setVisible(isChecked('layerQso'));
 
@@ -893,7 +972,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             const code = Number(f.get('dxccEntityCode'));
             if (!Number.isFinite(code)) continue;
 
-            // Nepoužíváme isModeVisible – DXCC barvy zůstávají i když jsou body schované.
+            // DXCC barvy se řídí jen DXCC checkboxy (ne Mode)
             if (!isDxccEnabledForMode(mi.bucket, mi.sub)) continue;
 
             if (mi.bucket === 'CW') workedDxcc.cw.add(code);
@@ -1120,12 +1199,19 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     }
 
     function pickLevel() {
+        const z = view.getZoom() ?? 0;
+
+        // pevné prahy:
+        // ≤5 : FIELD
+        // >5 a ≤11 : SQUARE
+        // >11 : SUBSQUARE
+        if (z <= 5) return "field";
+        if (z <= 11) return "square";
+
         const mode = ui.modeSelect?.value;
         if (mode === "field" || mode === "square" || mode === "subsquare") return mode;
 
-        const z = view.getZoom() ?? 0;
-        if (z <= 5) return "field";
-        return (z >= 11.5) ? "subsquare" : "square";
+        return "subsquare";
     }
 
     function refreshGrid() {
@@ -1347,6 +1433,19 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
 
     // ========= Events =========
     if (ui.langSelect) ui.langSelect.addEventListener('change', () => setLanguage(ui.langSelect.value));
+
+    const langButtons = document.querySelectorAll('.lang-btn[data-lang]');
+    if (langButtons.length) {
+        langButtons.forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const lang = btn.dataset.lang;
+                if (!lang) return;
+                setLanguage(lang);
+            });
+        });
+    }
+
     if (ui.modeSelect) ui.modeSelect.addEventListener('change', refreshGrid);
     if (ui.gridToggle) ui.gridToggle.addEventListener('change', refreshGrid);
 
@@ -1429,6 +1528,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     if (ui.ctxExportPngBtn) {
         ui.ctxExportPngBtn.addEventListener('click', () => {
             exportMapAsPng({ map, hideContextMenu });
+
+            // GA – export mapy
+            trackEvent('export_map_png', {});
         });
     }
 
@@ -1436,6 +1538,15 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         ui.plotTargetsBtn.addEventListener('click', async () => {
             await ensureDxccLoaded();
             await ensureDxccGeometryLoaded();
+
+            const rawText = ui.targetsTextarea?.value || '';
+            const lineCount = rawText.split(/\r?\n/).filter(s => s.trim()).length;
+
+            // GA – uživatel se pokusil vykreslit lokátory
+            trackEvent('plot_targets', {
+                lines_entered: lineCount
+            });
+
             plotTargetsFromTextarea();
             refreshGrid();
         });
@@ -1453,12 +1564,21 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
             clearAllLinkSources();
             clearWorkedDxccSets();
             dxccGeomSource.changed();
+
+            // GA – smazání všech lokátorů
+            trackEvent('clear_targets', {});
         });
     }
 
     if (ui.importEdiBtn) {
         ui.importEdiBtn.addEventListener('click', async () => {
             const file = ui.ediFileInput?.files && ui.ediFileInput.files[0];
+
+            // GA – klik na import
+            trackEvent('import_log_clicked', {
+                has_file: Boolean(file)
+            });
+
             if (!file) {
                 if (ui.statusEl) ui.statusEl.textContent = t().msgPickEdi;
                 return;
@@ -1584,6 +1704,12 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                         ui.statusEl.textContent = `ADIF načten: DXCC cílů ${byEntity.size}` + (unknownDxcc ? ` | Neznámé DXCC: ${unknownDxcc}` : '');
                     }
 
+                    // GA – úspěšný ADIF import
+                    trackEvent('import_adif_success', {
+                        dxcc_entities: byEntity.size,
+                        unknown_dxcc: unknownDxcc
+                    });
+
                     const ext = targetsSource.getExtent();
                     if (ext && ext.every(Number.isFinite)) {
                         view.fit(ext, { padding: [80, 80, 80, 80], duration: 350, maxZoom: 4 });
@@ -1612,6 +1738,9 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                     clearAllLinkSources();
                     clearWorkedDxccSets();
                     dxccGeomSource.changed();
+
+                    // GA – EDI bez lokátorů
+                    trackEvent('import_edi_empty', {});
                     return;
                 }
 
@@ -1625,8 +1754,19 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
                 refreshGrid();
 
                 if (ui.statusEl) ui.statusEl.textContent = t().msgEdiLoaded(parsed.targets.length, parsed.myLocator);
+
+                // GA – úspěšný EDI import
+                trackEvent('import_edi_success', {
+                    locator_count: parsed.targets.length,
+                    has_my_qth: Boolean(parsed.myLocator)
+                });
             } catch (err) {
                 if (ui.statusEl) ui.statusEl.textContent = `Import failed: ${err && err.message ? err.message : String(err)}`;
+
+                // GA – chyba při importu
+                trackEvent('import_log_error', {
+                    message: err && err.message ? String(err.message).slice(0, 150) : String(err)
+                });
             }
         });
     }
@@ -1691,9 +1831,40 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     bindTreeCheckboxLogic(onUiLayersChanged);
     bindColorButtons(onUiLayersChanged);
 
+    // DXCC label controls
+    function getDxccLabelSize() {
+        const val = Number(ui.dxccLabelSizeInput?.value);
+        if (Number.isFinite(val) && val >= 8 && val <= 32) return val;
+        return 12;
+    }
+
+    function bindDxccLabelControls() {
+        const s0 = ensureSettingsShape(loadSettings());
+        const savedSize = Number(s0.dxccLabels?.size);
+
+        if (ui.dxccLabelSizeInput && Number.isFinite(savedSize)) {
+            ui.dxccLabelSizeInput.value = savedSize;
+        }
+
+        const handler = () => {
+            const size = getDxccLabelSize();
+            settings = saveSettings({
+                ...settings,
+                dxccLabels: { size }
+            });
+            dxccLabelsLayer.changed();
+        };
+
+        ui.dxccLabelSizeInput?.addEventListener('change', handler);
+    }
+
+    bindDxccLabelControls();
+
+    // after restore: sync tree states and apply
     if (ui.layersPanelEl) syncWholeTree(ui.layersPanelEl);
     persistAllLayerCheckboxStates();
 
+    // restore QTH
     {
         const s0 = ensureSettingsShape(loadSettings());
         if (s0.qthLocator && ui.qthInput) {
