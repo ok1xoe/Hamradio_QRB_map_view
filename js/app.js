@@ -814,6 +814,15 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         view
     });
 
+    // mřížka se bude přepočítávat při změně zoomu i po dokončení posunu/zoomu
+    view.on('change:resolution', () => {
+        refreshGrid();
+    });
+
+    map.on('moveend', () => {
+        refreshGrid();
+    });
+
     // ========= Apply checkbox states to OL layers =========
     function applyLayerVisibilityFromCheckboxes() {
         // masters
@@ -1129,6 +1138,11 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
     function refreshGrid() {
         if (!ui.statusEl || !ui.gridToggle) return;
 
+        const size = map.getSize();
+        if (!size || size[0] <= 0 || size[1] <= 0) {
+            return; // mapa ještě nemá rozměr, mřížku teď nekreslíme
+        }
+
         const zNum = view.getZoom();
         const zTxt = (typeof zNum === 'number') ? zNum.toFixed(1) : '?';
 
@@ -1142,7 +1156,7 @@ import { loadDxccIndex, findDxccByCall } from './dxcc.js';
         gridLayer.setVisible(true);
 
         const level = pickLevel();
-        const extent = view.calculateExtent(map.getSize());
+        const extent = view.calculateExtent(size);
 
         const ll = ol.proj.toLonLat([extent[0], extent[1]]);
         const ur = ol.proj.toLonLat([extent[2], extent[3]]);

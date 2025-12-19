@@ -1,4 +1,7 @@
 // js/maidenhead.js
+
+// 1) Výpočet lokátoru z lon/lat
+
 export function maidenheadField(lon, lat) {
     const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const lonAdj = lon + 180;
@@ -42,6 +45,8 @@ export function maidenheadSubsquare(lon, lat) {
     return `${A[fieldLon]}${A[fieldLat]}${squareLon}${squareLat}${a[subsLon]}${a[subsLat]}`;
 }
 
+// 2) Převod lokátoru → bbox v WGS84
+
 export function locatorToExtentWGS84(locatorRaw) {
     const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const a = "abcdefghijklmnopqrstuvwxyz";
@@ -61,8 +66,12 @@ export function locatorToExtentWGS84(locatorRaw) {
     const fieldLon0 = -180 + fLon * 20;
     const fieldLat0 = -90 + fLat * 10;
 
-    if (loc.length === 2) return [fieldLon0, fieldLat0, fieldLon0 + 20, fieldLat0 + 10];
+    // 2 znaky: Field
+    if (loc.length === 2) {
+        return [fieldLon0, fieldLat0, fieldLon0 + 20, fieldLat0 + 10];
+    }
 
+    // 4 znaky: Square
     const sLon = Number(locU[2]);
     const sLat = Number(locU[3]);
     if (!Number.isInteger(sLon) || sLon < 0 || sLon > 9) return null;
@@ -71,8 +80,11 @@ export function locatorToExtentWGS84(locatorRaw) {
     const lon0 = fieldLon0 + sLon * 2;
     const lat0 = fieldLat0 + sLat * 1;
 
-    if (loc.length === 4) return [lon0, lat0, lon0 + 2, lat0 + 1];
+    if (loc.length === 4) {
+        return [lon0, lat0, lon0 + 2, lat0 + 1];
+    }
 
+    // 6 znaků: Subsquare
     const subLon = a.indexOf(locL[4]);
     const subLat = a.indexOf(locL[5]);
     if (subLon < 0 || subLon > 23) return null;
@@ -90,10 +102,16 @@ export function locatorToExtentWGS84(locatorRaw) {
 export function locatorToCenterLonLat(locatorRaw) {
     const ext = locatorToExtentWGS84(locatorRaw);
     if (!ext) return null;
-    return [(ext[0] + ext[2]) / 2, (ext[1] + ext[3]) / 2];
+    return [
+        (ext[0] + ext[2]) / 2,
+        (ext[1] + ext[3]) / 2
+    ];
 }
 
+// 3) Vykreslení mřížky pro daný extent (v EPSG:3857) a úroveň
+
 export function buildGrid(extent3857, level) {
+    // Extent je v EPSG:3857 → přepočet na WGS84
     const ll = ol.proj.toLonLat([extent3857[0], extent3857[1]]);
     const ur = ol.proj.toLonLat([extent3857[2], extent3857[3]]);
 
@@ -112,15 +130,16 @@ export function buildGrid(extent3857, level) {
         stepLat = 10;
         labelFn = maidenheadField;
     } else {
+        // "square"
         stepLon = 2;
         stepLat = 1;
         labelFn = maidenheadSquare;
     }
 
     const startLon = Math.floor((minLon + 180) / stepLon) * stepLon - 180;
-    const endLon = Math.ceil((maxLon + 180) / stepLon) * stepLon - 180;
+    const endLon   = Math.ceil((maxLon + 180) / stepLon) * stepLon - 180;
     const startLat = Math.floor((minLat + 90) / stepLat) * stepLat - 90;
-    const endLat = Math.ceil((maxLat + 90) / stepLat) * stepLat - 90;
+    const endLat   = Math.ceil((maxLat + 90) / stepLat) * stepLat - 90;
 
     const features = [];
 
@@ -129,16 +148,18 @@ export function buildGrid(extent3857, level) {
             const lon2 = lon + stepLon;
             const lat2 = lat + stepLat;
 
+            // Obvod políčka v mapové projekci
             const ring = [
-                [lon, lat],
+                [lon,  lat],
                 [lon2, lat],
                 [lon2, lat2],
-                [lon, lat2],
-                [lon, lat]
+                [lon,  lat2],
+                [lon,  lat]
             ].map(c => ol.proj.fromLonLat(c));
 
             const polygon = new ol.geom.Polygon([ring]);
 
+            // Střed pro popisek
             const centerLon = lon + stepLon / 2;
             const centerLat = lat + stepLat / 2;
 
